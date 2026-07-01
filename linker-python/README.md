@@ -34,6 +34,12 @@ linker-python/
     └── deploy.sh
 ```
 
+## Flujo DevSecOps
+
+La organización del trabajo, el tablero Kanban, la Definition of Ready y la Definition of Done están documentadas en:
+
+[DEVSECOPS.md](./DEVSECOPS.md)
+
 ## Ejecutar localmente
 
 ```bash
