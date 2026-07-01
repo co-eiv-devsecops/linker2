@@ -2,17 +2,21 @@
 
 ## 1. Introducción
 
-Este proyecto implementa una aplicación web llamada **Linker Python**, cuyo propósito es acortar URL. La aplicación toma como referencia el proyecto Linker original, pero se desarrolla en Python usando un servidor web simple.
+Este proyecto implementa una aplicación web llamada **Linker Python**, cuyo propósito es acortar URL. La aplicación toma como referencia el proyecto Linker original, pero se desarrolla en Python utilizando únicamente librerías estándar y un servidor web simple.
 
-El sistema permite que un usuario ingrese una URL larga desde un cliente web. La aplicación genera un identificador corto, almacena la relación entre el identificador y la URL original en SQLite, y permite acceder posteriormente a la URL original mediante una ruta corta.
+El sistema permite que un usuario ingrese una URL larga desde un cliente web. La aplicación genera un identificador corto, almacena la relación entre el identificador y la URL original en una base de datos SQLite y permite acceder posteriormente a la URL original mediante una ruta corta.
+
+---
 
 ## 2. Objetivo
 
-Construir una aplicación de un solo archivo con pocas líneas de código, usando Python como lenguaje principal, para demostrar conceptos básicos de desarrollo y despliegue de aplicaciones en la nube.
+Construir una aplicación web ligera desarrollada en Python para demostrar conceptos básicos de desarrollo, persistencia de datos y despliegue de aplicaciones en una máquina virtual de Oracle Cloud Infrastructure (OCI).
+
+---
 
 ## 3. Propósito de la aplicación
 
-El propósito de Linker Python es ofrecer un servicio simple de acortamiento de URL. Por ejemplo, una URL extensa como:
+El propósito de Linker Python es ofrecer un servicio simple de acortamiento de URL. Por ejemplo, una dirección como:
 
 ```txt
 https://www.ejemplo.com/documentos/proyecto/cloud/linker
@@ -21,28 +25,32 @@ https://www.ejemplo.com/documentos/proyecto/cloud/linker
 puede convertirse en una URL corta como:
 
 ```txt
-https://X.n-la-c.app/AbC123
+https://2.n-la-c.app/AbC123
 ```
 
 Cuando un usuario accede a la URL corta, la aplicación consulta la base de datos y redirecciona automáticamente a la URL original.
 
+---
+
 ## 4. Tecnologías utilizadas
 
 - **Python 3:** lenguaje principal de la aplicación.
-- **http.server:** librería estándar de Python usada para crear el servidor web sin frameworks externos.
-- **sqlite3:** librería estándar de Python usada para trabajar con SQLite.
-- **urllib.parse:** librería estándar usada para procesar rutas, formularios y URL.
-- **SQLite:** base de datos liviana para almacenar las URL.
-- **HTML, CSS y JavaScript:** cliente web de la aplicación.
-- **Nginx:** proxy reverso para exponer la aplicación desde la máquina virtual.
-- **systemd:** servicio de Linux para mantener la aplicación en ejecución.
+- **http.server:** librería estándar utilizada para implementar el servidor web.
+- **sqlite3:** librería estándar utilizada para almacenar las URL en una base de datos SQLite.
+- **urllib.parse:** procesamiento de rutas, formularios y URL.
+- **SQLite:** base de datos utilizada para la persistencia de la información.
+- **HTML, CSS y JavaScript:** interfaz de usuario.
+- **systemd:** administración del servicio en Linux.
+- **Git y GitHub:** control de versiones y almacenamiento del código fuente.
 
+---
 
 ## 5. Estructura del proyecto
 
 ```txt
 linker-python/
 ├── app.py
+├── linker.db
 ├── requirements.txt
 ├── README.md
 ├── DOCUMENTO.md
@@ -52,105 +60,186 @@ linker-python/
     └── deploy.sh
 ```
 
-El archivo principal es `app.py`. Allí se encuentra el servidor web, las rutas, la conexión con SQLite y el cliente web embebido.
+El archivo principal del proyecto es `app.py`, donde se implementa el servidor HTTP, la lógica de negocio, la conexión con SQLite y la interfaz web.
+
+---
 
 ## 6. Funcionamiento general
 
 La aplicación expone las siguientes rutas:
 
 | Método | Ruta | Descripción |
-|---|---|---|
-| GET | `/` | Muestra el cliente web |
-| POST | `/link` | Recibe una URL y crea un enlace corto |
-| GET | `/<id>` | Redirecciona al enlace original |
-| GET | `/health` | Permite validar que la aplicación está activa |
+|--------|------|-------------|
+| GET | `/` | Muestra la interfaz web |
+| POST | `/link` | Crea una URL corta |
+| GET | `/<id>` | Redirecciona a la URL original |
+| GET | `/health` | Verifica el estado de la aplicación |
 
-El flujo principal es:
+El flujo principal de la aplicación es el siguiente:
 
-1. El usuario abre la aplicación desde el navegador.
-2. El usuario escribe una URL válida.
-3. El cliente web envía la URL mediante `POST /link`.
-4. El servidor valida la URL.
-5. El servidor genera un identificador corto.
-6. La relación `id - URL original` se guarda en SQLite.
-7. El servidor responde con código HTTP `201 Created` y el encabezado `Location`.
-8. El cliente web muestra la URL corta generada.
-9. Al abrir la URL corta, el servidor redirecciona a la URL original.
+1. El usuario accede a la interfaz web.
+2. Ingresa una URL válida.
+3. El cliente envía la URL mediante una petición `POST /link`.
+4. El servidor valida la información recibida.
+5. Se genera un identificador corto.
+6. Se almacena la relación entre el identificador y la URL en SQLite.
+7. El servidor responde con código **HTTP 201 Created** y el encabezado `Location`.
+8. El cliente muestra la URL corta generada.
+9. Cuando un usuario visita la URL corta, el servidor redirecciona automáticamente a la dirección original.
 
-## 7. Cómo modificar el programa
+---
 
-Para modificar la aplicación se debe editar el archivo:
+## 7. Cómo acceder al código fuente
+
+El código fuente del proyecto se encuentra publicado en GitHub.
+
+Repositorio:
+
+```text
+https://github.com/co-eiv-devsecops/linker2
+```
+
+Para obtener una copia del proyecto:
+
+```bash
+git clone https://github.com/co-eiv-devsecops/linker2.git
+cd linker2
+git checkout feat/newLinker2
+cd linker-python
+```
+
+---
+
+## 8. Cómo modificar y ejecutar el programa
+
+El archivo principal de la aplicación es:
 
 ```txt
 app.py
 ```
 
-Algunos cambios comunes son:
+Algunos cambios comunes que pueden realizarse son:
 
-- Cambiar los estilos visuales dentro de la constante `INDEX_HTML`.
-- Modificar la longitud del identificador generado en la función `generate_id()`.
-- Cambiar la base de datos mediante la variable de entorno `LINKER_DB`.
+- Modificar la interfaz web definida en la constante `INDEX_HTML`.
+- Cambiar la longitud del identificador generado.
+- Cambiar la base de datos utilizando la variable de entorno `LINKER_DB`.
 - Cambiar el puerto mediante la variable de entorno `PORT`.
 
-## 8. Cómo ejecutar localmente
+Al tratarse de una aplicación desarrollada en Python, **no existe un proceso de compilación**. Los cambios realizados se reflejan al ejecutar nuevamente la aplicación.
 
-No es necesario crear ambiente virtual ni instalar dependencias externas. Ejecutar la aplicación:
+Para ejecutarla localmente:
 
 ```bash
-python app.py
+python3 app.py
 ```
 
-Abrir en el navegador:
-
-```txt
-http://localhost:8080
-```
-
-También se puede usar el script:
+También puede utilizarse el script incluido:
 
 ```bash
 chmod +x scripts/run_local.sh
 ./scripts/run_local.sh
 ```
 
+La aplicación quedará disponible en:
+
+```txt
+http://localhost:8080
+```
+
+---
+
 ## 9. Instrucciones de despliegue
 
-La aplicación se despliega en una máquina virtual Linux. El script `install_vm.sh` instala Python 3 y Nginx, crea el servicio de systemd y configura Nginx como proxy reverso.
+El despliegue se realizó sobre una máquina virtual Ubuntu en Oracle Cloud Infrastructure (OCI).
 
-Desde la VM, ejecutar:
-
-```bash
-chmod +x scripts/install_vm.sh
-DOMAIN=2.n-la-c.app ./scripts/install_vm.sh
-```
-
-Para desplegar desde la máquina local hacia la VM:
+### Clonar el repositorio
 
 ```bash
-TEAM_NUMBER=2 SERVER_USER=ubuntu ./scripts/deploy.sh
+git clone https://github.com/co-eiv-devsecops/linker2.git
+cd linker2
+git checkout feat/newLinker2
+cd linker-python
 ```
 
-El script realiza las siguientes tareas:
+### Configurar el servicio
 
-1. Copia los archivos a la máquina virtual.
-2. Ejecuta el instalador remoto.
-3. Configura el servicio de Python con systemd.
-4. Configura Nginx.
-5. Crea y activa el servicio `linker-python`.
+Se creó un servicio de **systemd** para ejecutar la aplicación automáticamente al iniciar la máquina virtual.
 
-## 10. URL de despliegue
+Archivo del servicio:
 
-La aplicación desplegada debe estar disponible en:
+```txt
+/etc/systemd/system/linker.service
+```
+
+Contenido:
+
+```ini
+[Unit]
+Description=Linker Python App
+After=network.target
+
+[Service]
+WorkingDirectory=/home/ubuntu/linker2/linker-python
+ExecStart=/usr/bin/python3 /home/ubuntu/linker2/linker-python/app.py
+Environment=PORT=8080
+Restart=always
+RestartSec=10
+KillSignal=SIGINT
+SyslogIdentifier=linker
+User=ubuntu
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Una vez configurado el servicio se ejecutaron los siguientes comandos:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart linker
+sudo systemctl status linker
+```
+
+Con esta configuración la aplicación queda ejecutándose automáticamente y disponible en el puerto **8080**.
+
+---
+
+## 10. Verificación del despliegue
+
+Para comprobar el correcto funcionamiento de la aplicación se utilizó el endpoint de salud:
+
+```bash
+curl http://localhost:8080/health
+```
+
+Respuesta esperada:
+
+```json
+{
+    "status": "ok",
+    "app": "linker-python"
+}
+```
+
+También se verificó la página principal:
+
+```bash
+curl http://localhost:8080/
+```
+
+Finalmente, se comprobó el acceso mediante el dominio configurado para el equipo:
 
 ```txt
 https://2.n-la-c.app
 ```
 
+---
+
 ## 11. Scripts incluidos
 
 ### `scripts/run_local.sh`
 
-Ejecuta la aplicación localmente. Crea el ambiente virtual, instala dependencias y levanta el servidor.
+Ejecuta la aplicación localmente.
 
 Invocación:
 
@@ -158,9 +247,11 @@ Invocación:
 ./scripts/run_local.sh
 ```
 
+---
+
 ### `scripts/install_vm.sh`
 
-Instala la aplicación en una máquina virtual Linux.
+Instala y configura la aplicación en una máquina virtual Linux.
 
 Invocación:
 
@@ -168,9 +259,11 @@ Invocación:
 DOMAIN=2.n-la-c.app ./scripts/install_vm.sh
 ```
 
+---
+
 ### `scripts/deploy.sh`
 
-Despliega la aplicación desde la máquina local hacia la VM.
+Automatiza el despliegue de la aplicación hacia la máquina virtual.
 
 Invocación:
 
@@ -178,12 +271,22 @@ Invocación:
 TEAM_NUMBER=2 SERVER_USER=ubuntu ./scripts/deploy.sh
 ```
 
-## 13. Consideraciones de seguridad y operación
+---
 
-La aplicación valida que la URL ingresada use los esquemas `http` o `https`. Además, las consultas a SQLite se realizan usando parámetros, evitando concatenar directamente los valores enviados por el usuario.
+## 12. Consideraciones de seguridad y operación
 
-La base de datos usada por defecto es `linker.db`. En un escenario productivo se recomienda agregar autenticación administrativa, logs, métricas, backups de la base de datos y límites de uso por cliente.
+La aplicación valida que las URL ingresadas utilicen los esquemas `http` o `https`.
 
-## 14. Conclusiones
+Las consultas a SQLite se realizan mediante consultas parametrizadas, evitando la concatenación directa de datos enviados por el usuario y reduciendo el riesgo de inyección SQL.
 
-Este proyecto demuestra cómo construir una aplicación web mínima para acortar URL usando Python. La solución conserva la simplicidad del ejercicio original, pero agrega una interfaz web clara, persistencia en SQLite, scripts de despliegue y una configuración básica para ejecutarse en una máquina virtual.
+La aplicación se ejecuta como un servicio administrado por **systemd**, permitiendo su reinicio automático en caso de fallo.
+
+Para un entorno de producción se recomienda complementar la solución con mecanismos de autenticación, registros de auditoría, monitoreo, copias de seguridad de la base de datos y políticas de limitación de solicitudes.
+
+---
+
+## 13. Conclusiones
+
+Este proyecto demuestra cómo desarrollar y desplegar una aplicación web sencilla utilizando únicamente Python y librerías estándar. La solución implementa un servicio funcional de acortamiento de URL con persistencia en SQLite, una interfaz web simple y un despliegue automatizado sobre una máquina virtual en Oracle Cloud Infrastructure mediante un servicio de **systemd**.
+
+El proyecto cumple con los objetivos planteados, permitiendo acceder al código fuente desde GitHub, modificar fácilmente la aplicación, ejecutarla sin proceso de compilación y desplegarla de forma permanente para su acceso mediante el dominio asignado al equipo.
