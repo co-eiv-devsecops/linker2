@@ -1,142 +1,3 @@
-import json
-import os
-import secrets
-import sqlite3
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import parse_qs, urlparse
-
-DATABASE = os.environ.get("LINKER_DB", "linker.db")
-PORT = int(os.environ.get("PORT", "8080"))
-
-
-def get_connection():
-    connection = sqlite3.connect(DATABASE)
-    connection.row_factory = sqlite3.Row
-    return connection
-
-
-def init_database():
-    with get_connection() as connection:
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS short_url (
-                id TEXT PRIMARY KEY,
-                url TEXT NOT NULL
-            )
-            """
-        )
-
-
-def is_valid_url(url):
-    parsed = urlparse(url)
-    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
-
-
-def generate_id():
-    return secrets.token_urlsafe(4).replace("-", "_")
-
-
-class LinkerHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        path = urlparse(self.path).path
-
-        if path == "/":
-            self.send_html(INDEX_HTML)
-            return
-
-        if path == "/health":
-            self.send_json({"status": "ok", "app": "linker-python"})
-            return
-
-        short_id = path.strip("/")
-        if not short_id or "/" in short_id:
-            self.send_error(404, "Not Found")
-            return
-
-        with get_connection() as connection:
-            row = connection.execute(
-                "SELECT url FROM short_url WHERE id = ?",
-                (short_id,),
-            ).fetchone()
-
-        if row is None:
-            self.send_error(404, "Short URL not found")
-            return
-
-        self.send_response(301)
-        self.send_header("Location", row["url"])
-        self.end_headers()
-
-    def do_POST(self):
-        path = urlparse(self.path).path
-
-        if path != "/link":
-            self.send_error(404, "Not Found")
-            return
-
-        content_length = int(self.headers.get("Content-Length", "0"))
-        body = self.rfile.read(content_length).decode("utf-8")
-        params = parse_qs(body)
-        url = params.get("url", [""])[0].strip()
-
-        if not is_valid_url(url):
-            self.send_text("Invalid or missing URL", status=400)
-            return
-
-        with get_connection() as connection:
-            while True:
-                short_id = generate_id()
-                exists = connection.execute(
-                    "SELECT 1 FROM short_url WHERE id = ?",
-                    (short_id,),
-                ).fetchone()
-                if not exists:
-                    break
-
-            connection.execute(
-                "INSERT INTO short_url (id, url) VALUES (?, ?)",
-                (short_id, url),
-            )
-
-        short_url = self.public_base_url() + "/" + short_id
-        self.send_response(201)
-        self.send_header("Location", short_url)
-        self.end_headers()
-
-    def public_base_url(self):
-        host = self.headers.get("Host", f"localhost:{PORT}")
-        proto = self.headers.get("X-Forwarded-Proto", "http")
-        return f"{proto}://{host}"
-
-    def send_html(self, content, status=200):
-        encoded = content.encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(encoded)))
-        self.end_headers()
-        self.wfile.write(encoded)
-
-    def send_json(self, data, status=200):
-        encoded = json.dumps(data).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(encoded)))
-        self.end_headers()
-        self.wfile.write(encoded)
-
-    def send_text(self, content, status=200):
-        encoded = content.encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
-        self.send_header("Content-Length", str(len(encoded)))
-        self.end_headers()
-        self.wfile.write(encoded)
-
-    def log_message(self, format, *args):
-        print("%s - - [%s] %s" % (self.address_string(), self.log_date_time_string(), format % args))
-
-
-INDEX_HTML = """
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -274,11 +135,11 @@ INDEX_HTML = """
 </head>
 <body>
     <main>
-        <span class="badge">Cloud · Python · SQLite</span>
+        <span class="badge">Cloud - Python - SQLite</span>
         <h1>Linker Python</h1>
         <p>
-            Servicio simple para acortar URL. Escribe una dirección completa,
-            genera un enlace corto y compártelo.
+            Servicio simple para acortar URL. Escribe una direccion completa,
+            genera un enlace corto y compartelo.
         </p>
 
         <form id="form">
@@ -292,7 +153,7 @@ INDEX_HTML = """
         </section>
 
         <footer>
-            Aplicación basada en el ejercicio Linker.
+            Aplicacion basada en el ejercicio Linker.
         </footer>
     </main>
 
@@ -351,11 +212,3 @@ INDEX_HTML = """
     </script>
 </body>
 </html>
-"""
-
-
-if __name__ == "__main__":
-    init_database()
-    server = HTTPServer(("0.0.0.0", PORT), LinkerHandler)
-    print(f"Linker Python running on http://0.0.0.0:{PORT}")
-    server.serve_forever()
