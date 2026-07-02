@@ -49,7 +49,16 @@ Cuando un usuario accede a la URL corta, la aplicación consulta la base de dato
 
 ```txt
 linker-python/
-├── app.py
+├── app.py              # Punto de entrada de la aplicacion
+├── config.py           # Variables de configuracion
+├── database.py         # Conexion e inicializacion de SQLite
+├── link_service.py     # Logica para validar, crear y buscar enlaces
+├── web.py              # Handler HTTP y rutas
+├── views.py            # Carga de vistas HTML
+├── views/
+│   └── index.html      # Frontend sencillo
+├── tests/
+│   └── test_link_service.py
 ├── linker.db
 ├── requirements.txt
 ├── README.md
@@ -60,7 +69,7 @@ linker-python/
     └── deploy.sh
 ```
 
-El archivo principal del proyecto es `app.py`, donde se implementa el servidor HTTP, la lógica de negocio, la conexión con SQLite y la interfaz web.
+El archivo `app.py` es el punto de entrada de la aplicacion. El servidor HTTP esta en `web.py`, la logica de negocio en `link_service.py`, la conexion con SQLite en `database.py` y la interfaz web en `views/index.html`.
 
 ---
 
@@ -112,7 +121,7 @@ cd linker-python
 
 ## 8. Cómo modificar y ejecutar el programa
 
-El archivo principal de la aplicación es:
+El archivo de arranque de la aplicación es:
 
 ```txt
 app.py
@@ -120,10 +129,11 @@ app.py
 
 Algunos cambios comunes que pueden realizarse son:
 
-- Modificar la interfaz web definida en la constante `INDEX_HTML`.
-- Cambiar la longitud del identificador generado.
+- Modificar la interfaz web en `views/index.html`.
+- Cambiar la longitud del identificador generado en `link_service.py`.
 - Cambiar la base de datos utilizando la variable de entorno `LINKER_DB`.
 - Cambiar el puerto mediante la variable de entorno `PORT`.
+- Probar la logica de enlaces con `python3 -m unittest discover tests`.
 
 Al tratarse de una aplicación desarrollada en Python, **no existe un proceso de compilación**. Los cambios realizados se reflejan al ejecutar nuevamente la aplicación.
 

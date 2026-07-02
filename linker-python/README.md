@@ -24,7 +24,16 @@ La aplicación está construida librerías estándar de Python:
 
 ```txt
 linker-python/
-├── app.py
+├── app.py              # Punto de entrada de la aplicacion
+├── config.py           # Variables de configuracion
+├── database.py         # Conexion e inicializacion de SQLite
+├── link_service.py     # Logica para validar, crear y buscar enlaces
+├── web.py              # Handler HTTP y rutas
+├── views.py            # Carga de vistas HTML
+├── views/
+│   └── index.html      # Frontend sencillo
+├── tests/
+│   └── test_link_service.py
 ├── linker.db
 ├── requirements.txt
 ├── README.md
@@ -65,6 +74,12 @@ chmod +x scripts/run_local.sh
 
 ```bash
 PORT=9090 python3 app.py
+```
+
+## Ejecutar pruebas
+
+```bash
+python3 -m unittest discover tests
 ```
 
 ## DevContainer
