@@ -25,7 +25,7 @@ https://www.ejemplo.com/documentos/proyecto/cloud/linker
 puede convertirse en una URL corta como:
 
 ```txt
-https://2.n-la-c.app/AbC123
+http://2.n-la-c.app/AbC123
 ```
 
 Cuando un usuario accede a la URL corta, la aplicación consulta la base de datos y redirecciona automáticamente a la URL original.
@@ -163,44 +163,47 @@ cd linker-python
 
 ### Configurar el servicio
 
-Se creó un servicio de **systemd** para ejecutar la aplicación automáticamente al iniciar la máquina virtual.
+La configuración de la máquina virtual se automatiza con `scripts/install_vm.sh`. El script instala `git`, `python3` y `nginx`, copia el proyecto a `/opt/linker-python`, configura Nginx y crea un servicio de **systemd** para ejecutar la aplicación automáticamente al iniciar la máquina virtual.
 
 Archivo del servicio:
 
 ```txt
-/etc/systemd/system/linker.service
+/etc/systemd/system/linker-python.service
 ```
 
-Contenido:
+Contenido generado:
 
 ```ini
 [Unit]
-Description=Linker Python App
+Description=Linker Python URL Shortener
 After=network.target
 
 [Service]
-WorkingDirectory=/home/ubuntu/linker2/linker-python
-ExecStart=/usr/bin/python3 /home/ubuntu/linker2/linker-python/app.py
-Environment=PORT=8080
-Restart=always
-RestartSec=10
-KillSignal=SIGINT
-SyslogIdentifier=linker
 User=ubuntu
+WorkingDirectory=/opt/linker-python
+Environment=PORT=8080
+Environment=LINKER_DB=/opt/linker-python/linker.db
+ExecStart=/usr/bin/python3 /opt/linker-python/app.py
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+SyslogIdentifier=linker-python
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-Una vez configurado el servicio se ejecutaron los siguientes comandos:
+Una vez configurado el servicio, el script ejecuta los siguientes comandos:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl restart linker
-sudo systemctl status linker
+sudo systemctl enable linker-python
+sudo systemctl restart linker-python
+sudo systemctl enable nginx
+sudo systemctl restart nginx
 ```
 
-Con esta configuración la aplicación queda ejecutándose automáticamente y disponible en el puerto **8080**.
+Con esta configuración la aplicación queda ejecutándose automáticamente desde `/opt/linker-python` y disponible en el puerto **8080**.
 
 ---
 
@@ -230,7 +233,7 @@ curl http://localhost:8080/
 Finalmente, se comprobó el acceso mediante el dominio configurado para el equipo:
 
 ```txt
-https://2.n-la-c.app
+http://2.n-la-c.app
 ```
 
 ---
@@ -251,7 +254,7 @@ Invocación:
 
 ### `scripts/install_vm.sh`
 
-Instala y configura la aplicación en una máquina virtual Linux.
+Instala y configura la aplicación en una máquina virtual Ubuntu.
 
 Invocación:
 

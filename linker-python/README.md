@@ -25,8 +25,10 @@ La aplicación está construida librerías estándar de Python:
 ```txt
 linker-python/
 ├── app.py
+├── linker.db
 ├── requirements.txt
 ├── README.md
+├── DEVSECOPS.md
 ├── DOCUMENTO.md
 └── scripts/
     ├── run_local.sh
@@ -92,12 +94,30 @@ Editar los valores del script `scripts/deploy.sh` o enviarlos como variables de 
 TEAM_NUMBER=2 SERVER_USER=ubuntu ./scripts/deploy.sh
 ```
 
-El despliegue copia la aplicación a la VM, instala Python 3 y Nginx, configura systemd y deja la aplicación ejecutándose como servicio.
+El despliegue copia el proyecto completo a la VM, instala Git, Python 3 y Nginx, configura systemd y deja la aplicación ejecutándose como servicio.
 
 La aplicación debe quedar disponible en:
 
 ```txt
-https://2.n-la-c.app
+http://2.n-la-c.app
 ```
 
 > Nota: si la plataforma no configura HTTPS automáticamente, se debe habilitar TLS según las instrucciones del curso o del administrador de la VM.
+
+## Paridad de entornos
+
+El proyecto implementa paridad de entornos mediante scripts Bash que automatizan completamente la preparación de una VM Ubuntu. Los scripts instalan los paquetes requeridos (`git`, `python3` y `nginx`), copian el contenido necesario del proyecto, configuran el servicio `systemd` `linker-python.service` en `/opt/linker-python`, configuran Nginx y verifican el endpoint `/health`.
+
+Para preparar una VM Ubuntu desde una copia del proyecto:
+
+```bash
+./scripts/install_vm.sh
+```
+
+Para desplegar desde la máquina local hacia la VM del equipo:
+
+```bash
+TEAM_NUMBER=2 SERVER_USER=ubuntu ./scripts/deploy.sh
+```
+
+Con estos scripts, cualquier desarrollador puede recrear el mismo entorno de producción de forma repetible, usando las mismas rutas, el mismo servicio y los mismos comandos de arranque.
