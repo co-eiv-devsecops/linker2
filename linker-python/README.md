@@ -67,6 +67,27 @@ chmod +x scripts/run_local.sh
 PORT=9090 python3 app.py
 ```
 
+## DevContainer
+
+El proyecto incluye un DevContainer para ejecutar Linker en un entorno de desarrollo consistente, sin depender de la configuracion local del computador.
+
+Para usarlo:
+
+1. Abrir el repositorio en VS Code.
+2. Seleccionar **Reopen in Container**.
+3. Ejecutar la aplicacion:
+
+```bash
+cd linker-python
+python3 app.py
+```
+
+La aplicacion queda disponible en:
+
+```txt
+http://localhost:8080
+```
+
 ## Endpoints
 
 | Método | Ruta | Descripción |
