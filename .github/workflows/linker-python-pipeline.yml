@@ -1,0 +1,84 @@
+name: Linker Python CI
+ 
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+ 
+jobs:
+  build-and-test:
+    name: Build and validate tests
+    runs-on: ubuntu-latest
+ 
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+ 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+ 
+      - name: Show Python version
+        run: python --version
+ 
+      - name: Validate project structure
+        run: |
+          test -f app.py
+          test -f requirements.txt
+          test -d tests
+ 
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -s requirements.txt ]; then pip install -r requirements.txt; fi
+ 
+      - name: Check Python syntax
+        run: |
+          python -m compileall .
+ 
+      - name: Run unit tests
+        run: |
+          python -m unittest discover -s tests -p "test_*.py" -v
+ 
+      - name: Start application
+        env:
+          PORT: 8080
+          LINKER_DB: /tmp/linker-ci.db
+        run: |
+          python app.py > linker.log 2>&1 &
+          echo $! > linker.pid
+          sleep 3
+ 
+      - name: Validate health endpoint
+        run: |
+          curl --fail http://127.0.0.1:8080/health
+ 
+      - name: Validate link creation endpoint
+        run: |
+          response_headers=$(mktemp)
+          curl --fail -i -X POST http://127.0.0.1:8080/link \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            --data "url=https://example.com" \
+            -o /tmp/linker-response.txt \
+            -D "$response_headers"
+          grep -i "^Location:" "$response_headers"
+ 
+      - name: Stop application
+        if: always()
+        run: |
+          if [ -f linker.pid ]; then kill $(cat linker.pid) || true; fi
+ 
+      - name: Upload application logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linker-logs
+          path: linker.log
+          if-no-files-found: ignore
