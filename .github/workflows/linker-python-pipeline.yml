@@ -147,7 +147,7 @@ jobs:
       name: production
     env:
       DEPLOYMENT_PRIVATE_KEY: ${{ secrets.DEPLOYMENT_PRIVATE_KEY }}
-      DEPLOYMENT_PUBLIC_KEY: ${{ vars.DEPLOYMENT_PUBLIC_KEY }}
+      DEPLOYMENT_PUBLIC_KEY: ${{ secrets.DEPLOYMENT_PUBLIC_KEY }}
       OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
       OCI_CLI_TENANCY: ${{ secrets.OCI_CLI_TENANCY }}
       OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CLI_FINGERPRINT }}
@@ -160,7 +160,6 @@ jobs:
         uses: co-eiv-devsecops/material-curso/actions/oci-bastion-deploy@main
         with:
           instance-id: ${{ vars.OCI_INSTANCE_OCID }}
-          bastion-id: ${{ vars.OCI_BASTION_OCID }}
           artifact-name: linker-app
           target-path: /tmp/deploy/linker/${{ github.sha }}
           target-os-username: ubuntu
