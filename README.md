@@ -1,5 +1,7 @@
 # Linker Python
 
+![CI](https://github.com/co-eiv-devsecops/linker2/actions/workflows/linker-python-pipeline.yml/badge.svg)
+
 Implementación en Python del ejercicio **Linker**, una aplicación web sencilla para acortar URL.
 
 
@@ -121,6 +123,33 @@ curl -i -X POST http://localhost:8080/link \
 ```
 
 La respuesta incluye el encabezado `Location` con la URL corta generada.
+
+## Integración continua (CI)
+
+El workflow [`linker-python-pipeline.yml`](./.github/workflows/linker-python-pipeline.yml) se ejecuta en cada `push` y `pull_request` hacia `main`/`master`, y valida:
+
+1. Estructura del proyecto (`app.py`, `requirements.txt`, `tests/`).
+2. Sintaxis de todo el código Python (`compileall`).
+3. Pruebas unitarias (`unittest discover`).
+4. Arranque real de la aplicación y verificación de `/health` y `/link`.
+
+Cuando ese `push` cae directamente sobre `main`/`master` y las pruebas pasan, un segundo job (`publish-image`) construye la imagen Docker de la aplicación y la publica en **GitHub Packages** (GitHub Container Registry).
+
+## Distribución de artefactos con GitHub Packages
+
+El artefacto que se distribuye es una **imagen Docker**, publicada en el GitHub Container Registry (`ghcr.io`) del repositorio. Se generan dos tags en cada publicación:
+
+- `ghcr.io/co-eiv-devsecops/linker2:latest`
+- `ghcr.io/co-eiv-devsecops/linker2:<sha-del-commit>`
+
+Para descargar y ejecutar la imagen (el paquete debe estar público, o hay que autenticarse con `docker login ghcr.io` usando un Personal Access Token con permiso `read:packages`):
+
+```bash
+docker pull ghcr.io/co-eiv-devsecops/linker2:latest
+docker run -p 8080:8080 ghcr.io/co-eiv-devsecops/linker2:latest
+```
+
+La aplicación queda disponible en `http://localhost:8080`.
 
 ## Despliegue en máquina virtual
 
