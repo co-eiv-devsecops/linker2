@@ -156,15 +156,15 @@ La aplicación queda disponible en `http://localhost:8080`.
 Cuando un `push` llega a `main`/`master` y pasa el job `build-and-test`, el workflow ejecuta automáticamente:
 
 1. **`Build`**: empaqueta los archivos necesarios para producción (`app.py`, `config.py`, `database.py`, `link_service.py`, `views.py`, `views/`, `requirements.txt`) y los sube como artefacto de GitHub Actions (`linker-app`).
-2. **`deploy-prod`**: usa la acción reutilizable `co-eiv-devsecops/material-curso/actions/oci-bastion-deploy` para conectarse a la VM del equipo a través de una sesión Bastion administrada de OCI (la VM no tiene IP pública), copiar el artefacto y reiniciar el servicio `linker-python` ya configurado por `scripts/install_vm.sh`.
+2. **`deploy-prod`**: usa la acción reutilizable `co-eiv-devsecops/material-curso/actions/oci-bastion-deploy` para conectarse a la VM del equipo a través de una sesión Bastion administrada de OCI (la VM no tiene IP pública), copiar el artefacto y (re)crear el servicio `systemd` `linker-python` en `/opt/linker-python`, reiniciándolo y verificando `/health`.
 
 Este job requiere que existan configuradas en el repositorio (Settings → Secrets and variables → Actions):
 
 - Secrets: `DEPLOYMENT_PRIVATE_KEY`, `OCI_CLI_USER`, `OCI_CLI_TENANCY`, `OCI_CLI_FINGERPRINT`, `OCI_CLI_KEY_CONTENT`.
 - Variables: `DEPLOYMENT_PUBLIC_KEY`, `OCI_CLI_REGION`, `OCI_BASTION_OCID`, `OCI_INSTANCE_OCID` (el OCID de la VM del equipo).
-- Un **Environment** de GitHub llamado `production` (Settings → Environments), opcionalmente con revisores requeridos para exigir aprobación manual antes del despliegue.
+- Un **Environment** de GitHub llamado `production` (Settings → Environments), restringido a la rama `main`.
 
-Requiere además que la VM ya tenga el servicio `linker-python` instalado (vía `scripts/install_vm.sh`), ya que `deploy-prod` solo actualiza el código y reinicia el servicio, no reinstala Nginx ni systemd desde cero.
+El script de despliegue es idempotente: escribe la unidad de `systemd` en cada corrida, así que no depende de que `scripts/install_vm.sh` se haya ejecutado antes manualmente contra la VM.
 
 ## Despliegue en máquina virtual (manual)
 
