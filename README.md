@@ -53,6 +53,12 @@ La organización del trabajo, el tablero Kanban, la Definition of Ready y la Def
 
 [DEVSECOPS.md](./DEVSECOPS.md)
 
+## Lanzamientos progresivos
+
+La estrategia de releases con feature flags, rollback y small batch development esta documentada en:
+
+[docs/releases.md](./docs/releases.md)
+
 ## Ejecutar localmente
 
 ```bash
