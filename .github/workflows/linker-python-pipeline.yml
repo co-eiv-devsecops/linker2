@@ -115,3 +115,86 @@ jobs:
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+  Build:
+    name: Build deployment artifact
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Package application files
+        run: |
+          mkdir -p artifact
+          cp -r app.py config.py database.py link_service.py views.py views requirements.txt artifact/
+
+      - name: Upload deployment artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linker-app
+          path: artifact
+          retention-days: 7
+
+  deploy-prod:
+    name: Deploy to Prod
+    runs-on: ubuntu-latest
+    needs: Build
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    environment:
+      name: production
+    env:
+      DEPLOYMENT_PRIVATE_KEY: ${{ secrets.DEPLOYMENT_PRIVATE_KEY }}
+      DEPLOYMENT_PUBLIC_KEY: ${{ vars.DEPLOYMENT_PUBLIC_KEY }}
+      OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
+      OCI_CLI_TENANCY: ${{ secrets.OCI_CLI_TENANCY }}
+      OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CLI_FINGERPRINT }}
+      OCI_CLI_KEY_CONTENT: ${{ secrets.OCI_CLI_KEY_CONTENT }}
+      OCI_CLI_REGION: ${{ vars.OCI_CLI_REGION }}
+      OCI_BASTION_OCID: ${{ vars.OCI_BASTION_OCID }}
+
+    steps:
+      - name: Deploy
+        uses: co-eiv-devsecops/material-curso/actions/oci-bastion-deploy@main
+        with:
+          instance-id: ${{ vars.OCI_INSTANCE_OCID }}
+          bastion-id: ${{ vars.OCI_BASTION_OCID }}
+          artifact-name: linker-app
+          target-path: /tmp/deploy/linker/${{ github.sha }}
+          target-os-username: ubuntu
+          oci-cli-cache-version: v1
+          script: |
+            set -euo pipefail
+
+            sudo mkdir -p /opt/linker-python
+            sudo cp -r "$DEPLOY_PATH"/. /opt/linker-python/
+            sudo chown -R ubuntu:ubuntu /opt/linker-python
+
+            sudo tee /etc/systemd/system/linker-python.service > /dev/null <<'EOF'
+            [Unit]
+            Description=Linker Python URL Shortener
+            After=network.target
+
+            [Service]
+            User=ubuntu
+            WorkingDirectory=/opt/linker-python
+            Environment=PORT=8080
+            Environment=LINKER_DB=/opt/linker-python/linker.db
+            ExecStart=/usr/bin/python3 /opt/linker-python/app.py
+            Restart=always
+            RestartSec=5
+            KillSignal=SIGINT
+            SyslogIdentifier=linker-python
+
+            [Install]
+            WantedBy=multi-user.target
+            EOF
+
+            sudo systemctl daemon-reload
+            sudo systemctl enable linker-python
+            sudo systemctl restart linker-python
+
+            sleep 2
+            curl --fail http://localhost:8080/health

@@ -151,7 +151,22 @@ docker run -p 8080:8080 ghcr.io/co-eiv-devsecops/linker2:latest
 
 La aplicación queda disponible en `http://localhost:8080`.
 
-## Despliegue en máquina virtual
+## Despliegue continuo (CD)
+
+Cuando un `push` llega a `main`/`master` y pasa el job `build-and-test`, el workflow ejecuta automáticamente:
+
+1. **`Build`**: empaqueta los archivos necesarios para producción (`app.py`, `config.py`, `database.py`, `link_service.py`, `views.py`, `views/`, `requirements.txt`) y los sube como artefacto de GitHub Actions (`linker-app`).
+2. **`deploy-prod`**: usa la acción reutilizable `co-eiv-devsecops/material-curso/actions/oci-bastion-deploy` para conectarse a la VM del equipo a través de una sesión Bastion administrada de OCI (la VM no tiene IP pública), copiar el artefacto y reiniciar el servicio `linker-python` ya configurado por `scripts/install_vm.sh`.
+
+Este job requiere que existan configuradas en el repositorio (Settings → Secrets and variables → Actions):
+
+- Secrets: `DEPLOYMENT_PRIVATE_KEY`, `OCI_CLI_USER`, `OCI_CLI_TENANCY`, `OCI_CLI_FINGERPRINT`, `OCI_CLI_KEY_CONTENT`.
+- Variables: `DEPLOYMENT_PUBLIC_KEY`, `OCI_CLI_REGION`, `OCI_BASTION_OCID`, `OCI_INSTANCE_OCID` (el OCID de la VM del equipo).
+- Un **Environment** de GitHub llamado `production` (Settings → Environments), opcionalmente con revisores requeridos para exigir aprobación manual antes del despliegue.
+
+Requiere además que la VM ya tenga el servicio `linker-python` instalado (vía `scripts/install_vm.sh`), ya que `deploy-prod` solo actualiza el código y reinicia el servicio, no reinstala Nginx ni systemd desde cero.
+
+## Despliegue en máquina virtual (manual)
 
 Editar los valores del script `scripts/deploy.sh` o enviarlos como variables de entorno:
 
@@ -159,7 +174,7 @@ Editar los valores del script `scripts/deploy.sh` o enviarlos como variables de 
 TEAM_NUMBER=2 SERVER_USER=ubuntu ./scripts/deploy.sh
 ```
 
-El despliegue copia el proyecto completo a la VM, instala Git, Python 3 y Nginx, configura systemd y deja la aplicación ejecutándose como servicio.
+El despliegue copia el proyecto completo a la VM, instala Git, Python 3 y Nginx, configura systemd y deja la aplicación ejecutándose como servicio. Esta ruta manual sigue sirviendo para el setup inicial de una VM nueva; una vez configurada, las actualizaciones subsecuentes las hace el pipeline de CD descrito arriba.
 
 La aplicación debe quedar disponible en:
 
