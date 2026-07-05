@@ -1,0 +1,311 @@
+name: Linker Blue Green Random Demo
+
+on:
+  workflow_dispatch:
+    inputs:
+      simulate_green_failure:
+        description: "Simular fallo en Green para ejecutar rollback a Blue"
+        required: true
+        default: false
+        type: boolean
+
+jobs:
+  build:
+    name: Build Linker
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate project structure
+        run: |
+          echo "Validando estructura del proyecto Linker..."
+          test -f app.py
+          test -d linker
+          test -d tests
+          echo "Estructura válida."
+
+      - name: Build application package
+        run: |
+          echo "Construyendo Linker..."
+          if [ -f scripts/build_artifact.sh ]; then
+            chmod +x scripts/build_artifact.sh
+            ./scripts/build_artifact.sh
+          else
+            echo "No existe scripts/build_artifact.sh. Se simula construcción."
+            mkdir -p dist/package
+            python -m zipapp . -m "app:main" -o dist/package/linker.pyz || true
+            echo "Build simulado finalizado."
+          fi
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          echo "Instalando dependencias si existen..."
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ] && [ -s requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            echo "El proyecto no requiere dependencias externas."
+          fi
+
+      - name: Check Python syntax
+        run: |
+          echo "Validando sintaxis..."
+          python -m compileall app.py linker tests
+
+      - name: Run unit tests
+        run: |
+          echo "Ejecutando pruebas unitarias reales..."
+          python -m unittest discover -s tests -p "test_*.py" -v
+
+  select-active-environment:
+    name: Select Random Active Environment
+    runs-on: ubuntu-latest
+    needs: unit-tests
+
+    outputs:
+      active: ${{ steps.select.outputs.active }}
+      inactive: ${{ steps.select.outputs.inactive }}
+      active_port: ${{ steps.select.outputs.active_port }}
+      inactive_port: ${{ steps.select.outputs.inactive_port }}
+
+    steps:
+      - name: Randomly choose current production environment
+        id: select
+        run: |
+          echo "Seleccionando aleatoriamente el ambiente activo actual..."
+
+          RANDOM_VALUE=$(( RANDOM % 2 ))
+
+          if [ "$RANDOM_VALUE" -eq 0 ]; then
+            ACTIVE="blue"
+            INACTIVE="green"
+            ACTIVE_PORT="8081"
+            INACTIVE_PORT="8082"
+          else
+            ACTIVE="green"
+            INACTIVE="blue"
+            ACTIVE_PORT="8082"
+            INACTIVE_PORT="8081"
+          fi
+
+          echo "active=$ACTIVE" >> "$GITHUB_OUTPUT"
+          echo "inactive=$INACTIVE" >> "$GITHUB_OUTPUT"
+          echo "active_port=$ACTIVE_PORT" >> "$GITHUB_OUTPUT"
+          echo "inactive_port=$INACTIVE_PORT" >> "$GITHUB_OUTPUT"
+
+          echo "Ambiente activo actual: $ACTIVE"
+          echo "Ambiente inactivo: $INACTIVE"
+          echo "Solo un ambiente recibe tráfico en este momento."
+
+  deploy-inactive:
+    name: Deploy to Inactive Environment
+    runs-on: ubuntu-latest
+    needs: select-active-environment
+    environment:
+      name: ${{ needs.select-active-environment.outputs.inactive }}
+
+    steps:
+      - name: Show Blue Green scenario
+        run: |
+          echo "Escenario Blue/Green"
+          echo "Ambiente activo actual: ${{ needs.select-active-environment.outputs.active }}"
+          echo "Puerto activo: ${{ needs.select-active-environment.outputs.active_port }}"
+          echo "Ambiente inactivo para nuevo despliegue: ${{ needs.select-active-environment.outputs.inactive }}"
+          echo "Puerto inactivo: ${{ needs.select-active-environment.outputs.inactive_port }}"
+
+      - name: Deploy Linker to inactive environment
+        run: |
+          echo "Desplegando nueva versión de Linker en ${{ needs.select-active-environment.outputs.inactive }}..."
+          echo "El tráfico todavía sigue en ${{ needs.select-active-environment.outputs.active }}."
+          echo "Servicio simulado: linker-${{ needs.select-active-environment.outputs.inactive }}.service"
+          echo "Puerto simulado: ${{ needs.select-active-environment.outputs.inactive_port }}"
+          echo "Despliegue completado en ambiente inactivo."
+
+  qa-inactive:
+    name: QA on Inactive Environment
+    runs-on: ubuntu-latest
+    needs:
+      - select-active-environment
+      - deploy-inactive
+
+    steps:
+      - name: Run QA validation
+        run: |
+          echo "Ejecutando QA en ${{ needs.select-active-environment.outputs.inactive }}..."
+          echo "Validando /health..."
+          echo "Validando creación de URL corta..."
+          echo "Validando redirección..."
+          echo "QA finalizado correctamente en ${{ needs.select-active-environment.outputs.inactive }}."
+
+      - name: Simulate green failure if requested
+        if: ${{ needs.select-active-environment.outputs.inactive == 'green' && github.event.inputs.simulate_green_failure == 'true' }}
+        run: |
+          echo "Se solicitó simular fallo en GREEN."
+          echo "GREEN no pasa QA."
+          exit 1
+
+  manual-approval-switch:
+    name: Manual Approval Before Traffic Switch
+    runs-on: ubuntu-latest
+    needs:
+      - select-active-environment
+      - qa-inactive
+    environment:
+      name: production-approval
+
+    steps:
+      - name: Approval received
+        run: |
+          echo "Aprobación manual recibida desde GitHub Environments."
+          echo "Se aprueba cambiar tráfico de ${{ needs.select-active-environment.outputs.active }} hacia ${{ needs.select-active-environment.outputs.inactive }}."
+
+  switch-traffic:
+    name: Switch Traffic
+    runs-on: ubuntu-latest
+    needs:
+      - select-active-environment
+      - manual-approval-switch
+
+    outputs:
+      new_active: ${{ steps.switch.outputs.new_active }}
+      previous_active: ${{ steps.switch.outputs.previous_active }}
+      new_active_port: ${{ steps.switch.outputs.new_active_port }}
+      previous_active_port: ${{ steps.switch.outputs.previous_active_port }}
+
+    steps:
+      - name: Redirect traffic to inactive environment
+        id: switch
+        run: |
+          PREVIOUS_ACTIVE="${{ needs.select-active-environment.outputs.active }}"
+          NEW_ACTIVE="${{ needs.select-active-environment.outputs.inactive }}"
+          PREVIOUS_ACTIVE_PORT="${{ needs.select-active-environment.outputs.active_port }}"
+          NEW_ACTIVE_PORT="${{ needs.select-active-environment.outputs.inactive_port }}"
+
+          echo "Ambiente productivo anterior: $PREVIOUS_ACTIVE"
+          echo "Redireccionando tráfico hacia: $NEW_ACTIVE"
+          echo "Simulando actualización de Nginx o balanceador..."
+          echo "proxy_pass http://127.0.0.1:$NEW_ACTIVE_PORT;"
+          echo "Tráfico actualizado."
+          echo "$NEW_ACTIVE ahora está activo."
+          echo "$PREVIOUS_ACTIVE queda inactivo como respaldo."
+
+          echo "new_active=$NEW_ACTIVE" >> "$GITHUB_OUTPUT"
+          echo "previous_active=$PREVIOUS_ACTIVE" >> "$GITHUB_OUTPUT"
+          echo "new_active_port=$NEW_ACTIVE_PORT" >> "$GITHUB_OUTPUT"
+          echo "previous_active_port=$PREVIOUS_ACTIVE_PORT" >> "$GITHUB_OUTPUT"
+
+  validate-production:
+    name: Validate Production After Switch
+    runs-on: ubuntu-latest
+    needs: switch-traffic
+
+    steps:
+      - name: Production smoke test
+        run: |
+          echo "Validando producción después del switch..."
+          echo "Ambiente activo actual: ${{ needs.switch-traffic.outputs.new_active }}"
+          echo "curl https://X.n-la-c.app/health"
+          echo "Producción responde correctamente desde ${{ needs.switch-traffic.outputs.new_active }}."
+
+  manual-approval-rollback:
+    name: Manual Approval Before Rollback
+    runs-on: ubuntu-latest
+    needs:
+      - switch-traffic
+      - validate-production
+    if: ${{ github.event.inputs.simulate_green_failure == 'true' }}
+    environment:
+      name: rollback-approval
+
+    steps:
+      - name: Rollback approval received
+        run: |
+          echo "Aprobación manual de rollback recibida."
+          echo "Se autoriza regresar de ${{ needs.switch-traffic.outputs.new_active }} a ${{ needs.switch-traffic.outputs.previous_active }}."
+
+  rollback:
+    name: Rollback to Previous Environment
+    runs-on: ubuntu-latest
+    needs:
+      - switch-traffic
+      - manual-approval-rollback
+    if: ${{ github.event.inputs.simulate_green_failure == 'true' }}
+
+    steps:
+      - name: Simulate rollback
+        run: |
+          echo "Ejecutando rollback..."
+          echo "Ambiente con problema: ${{ needs.switch-traffic.outputs.new_active }}"
+          echo "Regresando tráfico a: ${{ needs.switch-traffic.outputs.previous_active }}"
+          echo "proxy_pass http://127.0.0.1:${{ needs.switch-traffic.outputs.previous_active_port }};"
+          echo "Rollback completado."
+          echo "Producción vuelve a ${{ needs.switch-traffic.outputs.previous_active }}."
+
+  cleanup-inactive:
+    name: Cleanup or Keep Previous Environment
+    runs-on: ubuntu-latest
+    needs:
+      - switch-traffic
+      - validate-production
+    if: ${{ github.event.inputs.simulate_green_failure != 'true' }}
+
+    steps:
+      - name: Decide what to do with previous environment
+        run: |
+          echo "El switch fue exitoso."
+          echo "Ambiente activo actual: ${{ needs.switch-traffic.outputs.new_active }}"
+          echo "Ambiente anterior: ${{ needs.switch-traffic.outputs.previous_active }}"
+          echo "Opciones: mantenerlo como respaldo o destruirlo."
+          echo "Para este demo, se mantiene como respaldo."
+
+  summary:
+    name: Blue Green Summary
+    runs-on: ubuntu-latest
+    needs:
+      - build
+      - unit-tests
+      - select-active-environment
+      - deploy-inactive
+      - qa-inactive
+      - switch-traffic
+      - validate-production
+      - rollback
+      - cleanup-inactive
+    if: always()
+
+    steps:
+      - name: Show summary
+        run: |
+          echo "Resumen Blue/Green Deployment - Linker"
+          echo "----------------------------------------"
+          echo "1. Se trabajó con dos ambientes: BLUE y GREEN."
+          echo "2. Solo uno estuvo activo en producción."
+          echo "3. El ambiente activo inicial fue seleccionado aleatoriamente."
+          echo "4. La nueva versión se desplegó en el ambiente inactivo."
+          echo "5. Se ejecutaron pruebas unitarias reales."
+          echo "6. Se ejecutó QA simulado sobre el ambiente inactivo."
+          echo "7. Se simuló aprobación manual antes del switch."
+          echo "8. Se cambió el tráfico al nuevo ambiente."
+          echo "9. Se simuló rollback si fue solicitado."
+          echo "Pipeline finalizado."

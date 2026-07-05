@@ -1,0 +1,86 @@
+import json
+from http.server import BaseHTTPRequestHandler
+from urllib.parse import parse_qs, urlparse
+
+from config import PORT
+from database import get_connection
+from link_service import create_short_link, find_url
+from views import render_index
+
+
+class LinkerHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        path = urlparse(self.path).path
+
+        if path == "/":
+            self.send_html(render_index())
+            return
+
+        if path == "/health":
+            self.send_json({"status": "ok", "app": "linker-python"})
+            return
+
+        short_id = path.strip("/")
+        if not short_id or "/" in short_id:
+            self.send_error(404, "Not Found")
+            return
+
+        with get_connection() as connection:
+            url = find_url(connection, short_id)
+
+        if url is None:
+            self.send_error(404, "Short URL not found")
+            return
+
+        self.send_response(301)
+        self.send_header("Location", url)
+        self.end_headers()
+
+    def do_POST(self):
+        path = urlparse(self.path).path
+
+        if path != "/link":
+            self.send_error(404, "Not Found")
+            return
+
+        content_length = int(self.headers.get("Content-Length", "0"))
+        body = self.rfile.read(content_length).decode("utf-8")
+        params = parse_qs(body)
+        url = params.get("url", [""])[0]
+
+        try:
+            with get_connection() as connection:
+                short_id = create_short_link(connection, url)
+        except ValueError as error:
+            self.send_text(str(error), status=400)
+            return
+
+        short_url = self.public_base_url() + "/" + short_id
+        self.send_response(201)
+        self.send_header("Location", short_url)
+        self.end_headers()
+
+    def public_base_url(self):
+        host = self.headers.get("Host", f"localhost:{PORT}")
+        proto = self.headers.get("X-Forwarded-Proto", "http")
+        return f"{proto}://{host}"
+
+    def send_html(self, content, status=200):
+        self.send_content(content, "text/html; charset=utf-8", status)
+
+    def send_json(self, data, status=200):
+        self.send_content(json.dumps(data), "application/json; charset=utf-8", status)
+
+    def send_text(self, content, status=200):
+        self.send_content(content, "text/plain; charset=utf-8", status)
+
+    def send_content(self, content, content_type, status):
+        encoded = content.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
+
+    def log_message(self, format, *args):
+        print("%s - - [%s] %s" % (self.address_string(), self.log_date_time_string(), format % args))

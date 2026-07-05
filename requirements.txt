@@ -1,0 +1,2 @@
+# Este proyecto no requiere dependencias externas.
+# Usa únicamente librerías estándar de Python.

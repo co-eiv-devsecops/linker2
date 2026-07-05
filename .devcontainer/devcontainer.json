@@ -1,0 +1,13 @@
+{
+  "name": "Linker Python Dev",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12-bookworm",
+  "forwardPorts": [8080],
+  "postCreateCommand": "cd linker-python && chmod +x scripts/*.sh && python3 --version",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python3"
+      }
+    }
+  }
+}
