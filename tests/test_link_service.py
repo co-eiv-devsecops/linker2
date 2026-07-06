@@ -1,7 +1,7 @@
 import sqlite3
 import unittest
 
-from link_service import create_short_link, find_url, is_valid_url
+from link_service import create_short_link, find_url, is_valid_custom_id, is_valid_url
 
 
 def memory_connection():
@@ -26,6 +26,13 @@ class LinkServiceTest(unittest.TestCase):
         self.assertFalse(is_valid_url("example.com"))
         self.assertFalse(is_valid_url(""))
 
+    def test_validates_custom_ids(self):
+        self.assertTrue(is_valid_custom_id("equipo_2"))
+        self.assertTrue(is_valid_custom_id("release-2026"))
+        self.assertFalse(is_valid_custom_id("ab"))
+        self.assertFalse(is_valid_custom_id("alias con espacios"))
+        self.assertFalse(is_valid_custom_id("../admin"))
+
     def test_creates_short_link_with_injected_id_generator(self):
         with memory_connection() as connection:
             short_id = create_short_link(connection, " https://example.com ", lambda: "abc123")
@@ -46,6 +53,31 @@ class LinkServiceTest(unittest.TestCase):
 
             self.assertEqual(short_id, "free")
             self.assertEqual(find_url(connection, "free"), "https://new.example.com")
+
+    def test_creates_short_link_with_custom_alias(self):
+        with memory_connection() as connection:
+            short_id = create_short_link(
+                connection,
+                "https://example.com",
+                custom_id="mi_alias",
+            )
+
+            self.assertEqual(short_id, "mi_alias")
+            self.assertEqual(find_url(connection, "mi_alias"), "https://example.com")
+
+    def test_rejects_duplicate_custom_alias(self):
+        with memory_connection() as connection:
+            connection.execute(
+                "INSERT INTO short_url (id, url) VALUES (?, ?)",
+                ("mi_alias", "https://old.example.com"),
+            )
+
+            with self.assertRaises(ValueError):
+                create_short_link(
+                    connection,
+                    "https://new.example.com",
+                    custom_id="mi_alias",
+                )
 
     def test_rejects_invalid_url(self):
         with memory_connection() as connection:

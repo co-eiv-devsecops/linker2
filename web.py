@@ -5,6 +5,7 @@ from urllib.parse import parse_qs, urlparse
 
 from config import PORT
 from database import get_connection
+from feature_flags import is_enabled
 from link_service import create_short_link, find_url
 from views import render_index
 
@@ -57,10 +58,11 @@ class LinkerHandler(BaseHTTPRequestHandler):
         body = self.rfile.read(content_length).decode("utf-8")
         params = parse_qs(body)
         url = params.get("url", [""])[0]
+        custom_id = params.get("alias", [""])[0] if is_enabled("custom_alias") else None
 
         try:
             with get_connection() as connection:
-                short_id = create_short_link(connection, url)
+                short_id = create_short_link(connection, url, custom_id=custom_id)
         except ValueError as error:
             logger.warning("Rejected invalid URL from client=%s: %s", self.client_address[0], error)
             self.send_text(str(error), status=400)

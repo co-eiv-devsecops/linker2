@@ -53,6 +53,23 @@ La organización del trabajo, el tablero Kanban, la Definition of Ready y la Def
 
 [DEVSECOPS.md](./DEVSECOPS.md)
 
+## Guia de trabajo del equipo
+
+Para trabajar de forma fluida en este proyecto, revise primero estas guias:
+
+- [CONTRIBUTING.md](./CONTRIBUTING.md): flujo de contribucion, validaciones y checklist de PR.
+- [SUPPORT.md](./SUPPORT.md): como pedir ayuda y que informacion incluir.
+- [SECURITY.md](./SECURITY.md): como reportar problemas de seguridad.
+- [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md): reglas de convivencia del equipo.
+
+Al abrir issues o pull requests, use las plantillas que estan en [.github/ISSUE_TEMPLATE](./.github/ISSUE_TEMPLATE) y el template de PR que se aplica automaticamente.
+
+## Lanzamientos progresivos
+
+La estrategia de releases con feature flags, rollback y small batch development esta documentada en:
+
+[docs/releases.md](./docs/releases.md)
+
 ## Ejecutar localmente
 
 ```bash
