@@ -1,10 +1,17 @@
+import logging
 import sqlite3
 
 from config import DATABASE
 
+logger = logging.getLogger(__name__)
+
 
 def get_connection(database=DATABASE):
-    connection = sqlite3.connect(database)
+    try:
+        connection = sqlite3.connect(database)
+    except sqlite3.Error:
+        logger.exception("Failed to connect to database at %s", database)
+        raise
     connection.row_factory = sqlite3.Row
     return connection
 
@@ -19,3 +26,4 @@ def init_database(database=DATABASE):
             )
             """
         )
+    logger.info("Database initialized at %s", database)
