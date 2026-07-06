@@ -1,104 +1,107 @@
-import json
 import logging
-from http.server import BaseHTTPRequestHandler
-from urllib.parse import parse_qs, urlparse
+from flask import Flask, abort, jsonify, make_response, render_template, request
 
-from config import PORT
-from database import get_connection
+from config import DATABASE, HOST, LOG_LEVEL, PORT
+from database import SQLiteLinkRepository
 from feature_flags import is_enabled
-from link_service import create_short_link, find_url
-from views import render_index
+from link_service import LinkService
 
 logger = logging.getLogger(__name__)
 
 
-class LinkerHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        path = urlparse(self.path).path
+def configure_logging(app):
+    logger.setLevel(app.config["LOG_LEVEL"])
+    app.logger.handlers = logger.handlers
+    app.logger.setLevel(app.config["LOG_LEVEL"])
+    app.logger.propagate = False
 
-        if path == "/":
-            self.send_html(render_index())
-            return
 
-        if path == "/health":
-            self.send_json({"status": "ok", "app": "linker-python"})
-            return
+def public_base_url():
+    host = request.headers.get("Host", request.host or f"{HOST}:{PORT}")
+    proto = request.headers.get("X-Forwarded-Proto", request.scheme or "http")
+    return f"{proto}://{host}"
 
-        short_id = path.strip("/")
-        if not short_id or "/" in short_id:
-            self.send_error(404, "Not Found")
-            return
+
+def create_app(config=None, repository=None, link_service=None, flag_checker=is_enabled):
+    app = Flask(__name__, template_folder="views")
+    app.config.from_mapping(
+        DATABASE=DATABASE,
+        HOST=HOST,
+        PORT=PORT,
+        LOG_LEVEL=LOG_LEVEL,
+    )
+    if config:
+        app.config.update(config)
+
+    configure_logging(app)
+
+    repository = repository or SQLiteLinkRepository(app.config["DATABASE"])
+    if link_service is None:
+        repository.initialize()
+        link_service = LinkService(repository)
+
+    app.extensions["linker_repository"] = repository
+    app.extensions["linker_service"] = link_service
+    app.extensions["linker_flag_checker"] = flag_checker
+
+    @app.get("/")
+    def index():
+        return render_template("index.html")
+
+    @app.get("/health")
+    def health():
+        return jsonify({"status": "ok", "app": "linker-python"})
+
+    @app.post("/link")
+    def create_link():
+        service = app.extensions["linker_service"]
+        flag_checker = app.extensions["linker_flag_checker"]
+        url = request.form.get("url", "")
+        custom_id = request.form.get("alias", "") if flag_checker("custom_alias", request.environ) else None
 
         try:
-            with get_connection() as connection:
-                url = find_url(connection, short_id)
-        except Exception:
-            logger.exception("Failed to resolve short_id=%s", short_id)
-            self.send_error(500, "Internal Server Error")
-            return
-
-        if url is None:
-            logger.warning("Short URL not found: short_id=%s client=%s", short_id, self.client_address[0])
-            self.send_error(404, "Short URL not found")
-            return
-
-        logger.info("Redirect short_id=%s -> %s client=%s", short_id, url, self.client_address[0])
-        self.send_response(301)
-        self.send_header("Location", url)
-        self.end_headers()
-
-    def do_POST(self):
-        path = urlparse(self.path).path
-
-        if path != "/link":
-            self.send_error(404, "Not Found")
-            return
-
-        content_length = int(self.headers.get("Content-Length", "0"))
-        body = self.rfile.read(content_length).decode("utf-8")
-        params = parse_qs(body)
-        url = params.get("url", [""])[0]
-        custom_id = params.get("alias", [""])[0] if is_enabled("custom_alias") else None
-
-        try:
-            with get_connection() as connection:
-                short_id = create_short_link(connection, url, custom_id=custom_id)
+            short_id = service.create_short_link(url, custom_id=custom_id)
         except ValueError as error:
-            logger.warning("Rejected invalid URL from client=%s: %s", self.client_address[0], error)
-            self.send_text(str(error), status=400)
-            return
+            logger.warning("Rejected invalid URL from client=%s: %s", request.remote_addr, error)
+            response = make_response(str(error), 400)
+            response.headers["Content-Type"] = "text/plain; charset=utf-8"
+            return response
         except Exception:
             logger.exception("Failed to create short link for url=%s", url)
-            self.send_error(500, "Internal Server Error")
-            return
+            abort(500)
 
-        logger.info("Created short_id=%s -> %s client=%s", short_id, url, self.client_address[0])
-        short_url = self.public_base_url() + "/" + short_id
-        self.send_response(201)
-        self.send_header("Location", short_url)
-        self.end_headers()
+        logger.info("Created short_id=%s -> %s client=%s", short_id, url, request.remote_addr)
+        short_url = f"{public_base_url()}/{short_id}"
+        response = make_response("", 201)
+        response.headers["Location"] = short_url
+        return response
 
-    def public_base_url(self):
-        host = self.headers.get("Host", f"localhost:{PORT}")
-        proto = self.headers.get("X-Forwarded-Proto", "http")
-        return f"{proto}://{host}"
+    @app.get("/<short_id>")
+    def redirect_short(short_id):
+        try:
+            service = app.extensions["linker_service"]
+            url = service.find_url(short_id)
+        except Exception:
+            logger.exception("Failed to resolve short_id=%s", short_id)
+            abort(500)
 
-    def send_html(self, content, status=200):
-        self.send_content(content, "text/html; charset=utf-8", status)
+        if url is None:
+            logger.warning("Short URL not found: short_id=%s client=%s", short_id, request.remote_addr)
+            abort(404)
 
-    def send_json(self, data, status=200):
-        self.send_content(json.dumps(data), "application/json; charset=utf-8", status)
+        logger.info("Redirect short_id=%s -> %s client=%s", short_id, url, request.remote_addr)
+        response = make_response("", 301)
+        response.headers["Location"] = url
+        return response
 
-    def send_text(self, content, status=200):
-        self.send_content(content, "text/plain; charset=utf-8", status)
+    return app
 
-    def send_content(self, content, content_type, status):
-        encoded = content.encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(encoded)))
-        self.end_headers()
-        self.wfile.write(encoded)
 
-    def log_message(self, format, *args):
-        logger.info("%s - - %s", self.address_string(), format % args)
+def run():
+    app = create_app()
+    logger.info("Linker Python running on http://%s:%s", app.config["HOST"], app.config["PORT"])
+    app.run(host=app.config["HOST"], port=app.config["PORT"])
+
+
+if __name__ == "__main__":
+    run()
