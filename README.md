@@ -237,3 +237,31 @@ TEAM_NUMBER=2 SERVER_USER=ubuntu ./scripts/deploy.sh
 ```
 
 Con estos scripts, cualquier desarrollador puede recrear el mismo entorno de producción de forma repetible, usando las mismas rutas, el mismo servicio y los mismos comandos de arranque.
+
+## Configuración de verbosidad de logs
+
+El proyecto cuenta con un sistema de registro de eventos estructurado en 5 niveles de verbosidad (DEBUG, INFO, WARNING, ERROR, CRITICAL).
+
+### Selección de nivel mediante variables de entorno
+
+Para configurar la verbosidad, defina la variable de entorno `LOG_LEVEL` antes de ejecutar la aplicación. Los valores válidos son:
+
+*   **`DEBUG`**: Imprime flujos de ejecución detallados internos de la lógica del negocio (ej. validaciones de URL).
+*   **`INFO`**: Nivel operativo estándar de producción. Muestra confirmaciones de creación de enlaces y redirecciones exitosas.
+*   **`WARNING`**: Registra solicitudes incorrectas del cliente (URLs mal formadas o enlaces que no existen).
+*   **`ERROR`**: Reporta excepciones internas que impiden procesar solicitudes (como fallas del servidor HTTP).
+*   **`CRITICAL`**: Registra fallos graves que comprometen la base de datos o el estado general de la aplicación.
+
+### Ejemplos de uso
+
+Para modificar la verbosidad usando el mismo artefacto, configure la variable en su terminal o entorno de ejecución:
+
+```bash
+# Cambiar verbosidad a modo Diagnóstico (Muestra DEBUG, INFO, WARNING, ERROR, CRITICAL)
+export LOG_LEVEL=DEBUG
+python3 app.py
+
+# Cambiar verbosidad a modo Producción estricto (Muestra solo WARNING, ERROR, CRITICAL)
+export LOG_LEVEL=WARNING
+python3 app.py
+```

@@ -67,7 +67,7 @@ def create_app(config=None, repository=None, link_service=None, flag_checker=is_
             response.headers["Content-Type"] = "text/plain; charset=utf-8"
             return response
         except Exception:
-            logger.exception("Failed to create short link for url=%s", url)
+            logger.error("Failed to create short link for url=%s due to internal error", url, exc_info=True)
             abort(500)
 
         logger.info("Created short_id=%s -> %s client=%s", short_id, url, request.remote_addr)
@@ -82,7 +82,7 @@ def create_app(config=None, repository=None, link_service=None, flag_checker=is_
             service = app.extensions["linker_service"]
             url = service.find_url(short_id)
         except Exception:
-            logger.exception("Failed to resolve short_id=%s", short_id)
+            logger.error("Failed to resolve short_id=%s due to internal processing error", short_id, exc_info=True)
             abort(500)
 
         if url is None:
