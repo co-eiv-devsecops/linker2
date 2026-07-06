@@ -1,4 +1,5 @@
 import json
+import logging
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
@@ -6,6 +7,8 @@ from config import PORT
 from database import get_connection
 from link_service import create_short_link, find_url
 from views import render_index
+
+logger = logging.getLogger(__name__)
 
 
 class LinkerHandler(BaseHTTPRequestHandler):
@@ -25,13 +28,20 @@ class LinkerHandler(BaseHTTPRequestHandler):
             self.send_error(404, "Not Found")
             return
 
-        with get_connection() as connection:
-            url = find_url(connection, short_id)
+        try:
+            with get_connection() as connection:
+                url = find_url(connection, short_id)
+        except Exception:
+            logger.exception("Failed to resolve short_id=%s", short_id)
+            self.send_error(500, "Internal Server Error")
+            return
 
         if url is None:
+            logger.warning("Short URL not found: short_id=%s client=%s", short_id, self.client_address[0])
             self.send_error(404, "Short URL not found")
             return
 
+        logger.info("Redirect short_id=%s -> %s client=%s", short_id, url, self.client_address[0])
         self.send_response(301)
         self.send_header("Location", url)
         self.end_headers()
@@ -52,9 +62,15 @@ class LinkerHandler(BaseHTTPRequestHandler):
             with get_connection() as connection:
                 short_id = create_short_link(connection, url)
         except ValueError as error:
+            logger.warning("Rejected invalid URL from client=%s: %s", self.client_address[0], error)
             self.send_text(str(error), status=400)
             return
+        except Exception:
+            logger.exception("Failed to create short link for url=%s", url)
+            self.send_error(500, "Internal Server Error")
+            return
 
+        logger.info("Created short_id=%s -> %s client=%s", short_id, url, self.client_address[0])
         short_url = self.public_base_url() + "/" + short_id
         self.send_response(201)
         self.send_header("Location", short_url)
@@ -83,4 +99,4 @@ class LinkerHandler(BaseHTTPRequestHandler):
         self.wfile.write(encoded)
 
     def log_message(self, format, *args):
-        print("%s - - [%s] %s" % (self.address_string(), self.log_date_time_string(), format % args))
+        logger.info("%s - - %s", self.address_string(), format % args)
