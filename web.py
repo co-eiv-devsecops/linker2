@@ -6,7 +6,7 @@ from database import SQLiteLinkRepository
 from feature_flags import is_enabled
 from link_service import LinkService
 
-from opentelemetry import metrics
+from opentelemetry import metrics, trace
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
