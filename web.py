@@ -12,6 +12,10 @@ from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.sdk.resources import Resource
 
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
 logger = logging.getLogger(__name__)
 
 
@@ -29,6 +33,13 @@ def configure_metrics(app):
     
     provider = MeterProvider(resource=resource, metric_readers=[reader])
     metrics.set_meter_provider(provider)
+
+def configure_tracing(app):
+    resource = Resource.create({"service.name": "linker-python"})
+    provider = TracerProvider(resource=resource)
+    processor = BatchSpanProcessor(OTLPSpanExporter())
+    provider.add_span_processor(processor)
+    trace.set_tracer_provider(provider)
 
 def public_base_url():
     host = request.headers.get("Host", request.host or f"{HOST}:{PORT}")
@@ -49,6 +60,7 @@ def create_app(config=None, repository=None, link_service=None, flag_checker=is_
 
     configure_logging(app)
     configure_metrics(app)
+    configure_tracing(app)
 
     repository = repository or SQLiteLinkRepository(app.config["DATABASE"])
     if link_service is None:
