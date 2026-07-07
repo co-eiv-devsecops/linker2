@@ -6,6 +6,12 @@ from database import SQLiteLinkRepository
 from feature_flags import is_enabled
 from link_service import LinkService
 
+from opentelemetry import metrics
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+from opentelemetry.sdk.resources import Resource
+
 logger = logging.getLogger(__name__)
 
 
@@ -15,6 +21,14 @@ def configure_logging(app):
     app.logger.setLevel(app.config["LOG_LEVEL"])
     app.logger.propagate = False
 
+def configure_metrics(app):
+    resource = Resource.create({"service.name": "linker-python"})
+    
+    exporter = OTLPMetricExporter()
+    reader = PeriodicExportingMetricReader(exporter)
+    
+    provider = MeterProvider(resource=resource, metric_readers=[reader])
+    metrics.set_meter_provider(provider)
 
 def public_base_url():
     host = request.headers.get("Host", request.host or f"{HOST}:{PORT}")
@@ -34,6 +48,7 @@ def create_app(config=None, repository=None, link_service=None, flag_checker=is_
         app.config.update(config)
 
     configure_logging(app)
+    configure_metrics(app)
 
     repository = repository or SQLiteLinkRepository(app.config["DATABASE"])
     if link_service is None:
