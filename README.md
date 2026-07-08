@@ -2,12 +2,12 @@
 
 ![CI](https://github.com/co-eiv-devsecops/linker2/actions/workflows/linker-python-pipeline.yml/badge.svg)
 
-Implementación en Python del ejercicio **Linker**, una aplicación web sencilla para acortar URL.
+Implementación en Python del ejercicio **Linker**, una aplicación web sencilla para acortar URL, ahora refactorizada sobre **Flask** con inyección de dependencias en la capa de aplicación y persistencia.
 
 
-La aplicación está construida librerías estándar de Python:
+La aplicación está construida con Flask y componentes desacoplados de Python:
 
-- `http.server` para el servidor web.
+- `Flask` para la capa web.
 - `sqlite3` para la persistencia.
 - `urllib.parse` para procesar rutas, formularios y URL.
 - `secrets` para generar identificadores cortos.
@@ -28,9 +28,9 @@ La aplicación está construida librerías estándar de Python:
 linker-python/
 ├── app.py              # Punto de entrada de la aplicacion
 ├── config.py           # Variables de configuracion
-├── database.py         # Conexion e inicializacion de SQLite
-├── link_service.py     # Logica para validar, crear y buscar enlaces
-├── web.py              # Handler HTTP y rutas
+├── database.py         # Repositorio SQLite e inicializacion
+├── link_service.py     # Logica de aplicacion para validar, crear y buscar enlaces
+├── web.py              # Factory de Flask y rutas HTTP
 ├── views.py            # Carga de vistas HTML
 ├── views/
 │   └── index.html      # Frontend sencillo
@@ -70,6 +70,16 @@ La estrategia de releases con feature flags, rollback y small batch development 
 
 [docs/releases.md](./docs/releases.md)
 
+## Componentes
+
+El proyecto separa responsabilidades de esta forma:
+
+- `web.py`: crea la app de Flask y define las rutas.
+- `link_service.py`: contiene la logica de negocio y recibe el repositorio por inyeccion.
+- `database.py`: encapsula el acceso a SQLite.
+- `feature_flags.py`: resuelve flags locales y, opcionalmente, LaunchDarkly.
+- `views/index.html`: plantilla HTML de la interfaz.
+
 ## Ejecutar localmente
 
 ```bash
@@ -99,6 +109,15 @@ PORT=9090 python3 app.py
 
 ```bash
 python3 -m unittest discover tests
+```
+
+## Cobertura
+
+El objetivo de cobertura del proyecto es mayor a 90%. Para medirla localmente:
+
+```bash
+python3 -m coverage run -m unittest discover tests
+python3 -m coverage report -m
 ```
 
 ## DevContainer

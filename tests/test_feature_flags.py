@@ -1,5 +1,7 @@
 import unittest
 
+import feature_flags
+
 from feature_flags import is_enabled, local_flag_value, parse_bool
 
 
@@ -14,6 +16,19 @@ class FakeLaunchDarklyClient:
         if self.error:
             raise self.error
         return self.value
+
+
+class FakeContextBuilder:
+    def __init__(self, key):
+        self.key = key
+        self.name_value = None
+
+    def name(self, value):
+        self.name_value = value
+        return self
+
+    def build(self):
+        return {"key": self.key, "name": self.name_value}
 
 
 class FeatureFlagsTest(unittest.TestCase):
@@ -55,6 +70,29 @@ class FeatureFlagsTest(unittest.TestCase):
         environ = {"LINKER_ENABLE_CUSTOM_ALIAS": "true"}
 
         self.assertTrue(is_enabled("custom_alias", environ, launchdarkly_client=client))
+
+    def test_get_launchdarkly_client_returns_none_without_sdk_key(self):
+        self.assertIsNone(feature_flags.get_launchdarkly_client({}))
+
+    def test_launchdarkly_context_uses_custom_context_key_when_sdk_is_unavailable(self):
+        original_context = feature_flags.Context
+        try:
+            feature_flags.Context = None
+            self.assertEqual(
+                feature_flags.launchdarkly_context({"LAUNCHDARKLY_CONTEXT_KEY": "custom-context"}),
+                "custom-context",
+            )
+        finally:
+            feature_flags.Context = original_context
+
+    def test_launchdarkly_context_builds_context_when_sdk_is_available(self):
+        original_context = feature_flags.Context
+        try:
+            feature_flags.Context = type("ContextModule", (), {"builder": staticmethod(lambda key: FakeContextBuilder(key))})()
+            context = feature_flags.launchdarkly_context({"LAUNCHDARKLY_CONTEXT_KEY": "custom-context"})
+            self.assertEqual(context, {"key": "custom-context", "name": "Linker Python"})
+        finally:
+            feature_flags.Context = original_context
 
 
 if __name__ == "__main__":
