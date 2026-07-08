@@ -72,6 +72,10 @@ class SQLiteLinkRepository:
             return None
 
         return row["url"]
+    
+    def health_check(self):
+        with self.connection_scope() as connection:
+            connection.execute("SELECT 1").fetchone()
 
 
 def get_connection(database=DATABASE):

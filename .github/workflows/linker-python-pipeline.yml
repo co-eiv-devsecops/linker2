@@ -92,6 +92,24 @@ jobs:
 
     env:
       IMAGE_NAME: ghcr.io/${{ github.repository }}
+      HOST: 127.0.0.1
+      PORT: 8080
+      DB_ENGINE: mysql
+
+      MYSQL_HOST: ${{ vars.MYSQL_HOST }}
+      MYSQL_PORT: ${{ vars.MYSQL_PORT }}
+      MYSQL_DATABASE: ${{ vars.MYSQL_DATABASE }}
+      MYSQL_USER: ${{ vars.MYSQL_USER }}
+      MYSQL_PWD: ${{ secrets.MYSQL_PWD }}
+
+      OTEL_SERVICE_NAME: ${{ vars.OTEL_SERVICE_NAME }}
+      OTEL_TRACES_ENABLED: "true"
+      OTEL_METRICS_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${{ vars.OTEL_EXPORTER_OTLP_ENDPOINT }}
+      OTEL_EXPORTER_OTLP_HEADERS: ${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}
+      LAUNCHDARKLY_SDK_KEY: ${{ secrets.LAUNCHDARKLY_SDK_KEY }}
+      
+      
 
     steps:
       - name: Checkout source code
