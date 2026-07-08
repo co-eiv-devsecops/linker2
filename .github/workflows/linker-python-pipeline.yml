@@ -1,7 +1,10 @@
-name: Linker Python CI
+name: Linker Python CI/CD
 
 on:
   push:
+    branches:
+      - main
+      - master
   pull_request:
     branches:
       - main
@@ -9,20 +12,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-and-test:
-    name: Build and validate tests
+  validate-build-package:
+    name: Validate, test and package
     runs-on: ubuntu-latest
-
-    env:
-      HOST: 127.0.0.1
-      PORT: 8080
-      DB_ENGINE: sqlite
-      LINKER_DB: /tmp/linker-ci.db
-      DATABASE: /tmp/linker-ci.db
-      OTEL_SERVICE_NAME: linker-python-ci
-      OTEL_TRACES_ENABLED: "false"
-      OTEL_METRICS_ENABLED: "false"
-      LAUNCHDARKLY_SDK_KEY: ""
 
     steps:
       - name: Checkout source code
@@ -39,25 +31,12 @@ jobs:
       - name: Validate project structure
         run: |
           test -f app.py
-          test -f web.py
-          test -f config.py
-          test -f database.py
-          test -f link_service.py
-          test -f requirements.txt
+          test -d linker
           test -d tests
-          echo "Project structure is valid."
-
-      - name: Validate healthz route exists
-        run: |
-          grep -n "healthz" web.py
-
-      - name: Validate no root dynamic short route
-        run: |
-          if grep -n '@app.get("/<short_id>")' web.py; then
-            echo "ERROR: No debe existir @app.get(\"/<short_id>\"). Usar solo /r/<short_id>."
-            exit 1
-          fi
-          echo "Route validation passed."
+          test -f linker/config.py
+          test -f linker/contracts.py
+          test -f linker/services.py
+          test -f linker/database.py
 
       - name: Install dependencies
         run: |
@@ -65,51 +44,76 @@ jobs:
           if [ -s requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Check Python syntax
-        run: |
-          python -m compileall .
+        run: python -m compileall app.py linker tests
 
       - name: Run unit tests
-        run: |
-          python -m unittest discover -s tests -p "test_*.py" -v
+        run: python -m unittest discover -s tests -p "test_*.py" -v
 
-      - name: Start application
+      - name: Build executable pyz
         run: |
-          python app.py > linker.log 2>&1 &
-          echo $! > linker.pid
-          sleep 5
+          mkdir -p dist/package
+          python -m zipapp . \
+            --main "linker.__main__:run" \
+            --python "/usr/bin/env python3" \
+            --output dist/package/linker.pyz
+
+      - name: Create runtime package
+        run: |
+          cp README.md DOCUMENTO.md dist/package/ 2>/dev/null || true
+          cat > dist/package/run.sh <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          export LINKER_HOST="${LINKER_HOST:-0.0.0.0}"
+          export LINKER_PORT="${LINKER_PORT:-8080}"
+          export LINKER_DB="${LINKER_DB:-linker.db}"
+          python3 linker.pyz
+          EOF
+          chmod +x dist/package/run.sh
+          cat > dist/package/.env.example <<'EOF'
+          LINKER_HOST=0.0.0.0
+          LINKER_PORT=8080
+          LINKER_DB=linker.db
+          LINKER_PUBLIC_BASE_URL=https://X.n-la-c.app
+          LINKER_ID_LENGTH=6
+          EOF
+          cd dist/package
+          zip -qr ../linker-python.zip .
+
+      - name: Start packaged application
+        env:
+          LINKER_HOST: 127.0.0.1
+          LINKER_PORT: 8080
+          LINKER_DB: /tmp/linker-ci.db
+          LINKER_PUBLIC_BASE_URL: http://127.0.0.1:8080
+        run: |
+          cd dist/package
+          python3 linker.pyz > ../../linker.log 2>&1 &
+          echo $! > ../../linker.pid
+          sleep 3
 
       - name: Validate health endpoint
-        run: |
-          curl --fail http://127.0.0.1:8080/health
-
-      - name: Validate healthz endpoint
-        run: |
-          curl --fail http://127.0.0.1:8080/healthz
+        run: curl --fail http://127.0.0.1:8080/health
 
       - name: Validate link creation endpoint
         run: |
           response_headers=$(mktemp)
-
-          curl --fail -i -X POST http://127.0.0.1:8080/link \
-            -H "Content-Type: application/x-www-form-urlencoded" \
-            --data "url=https://example.com" \
-            -o /tmp/linker-response.txt \
+          curl --fail -i -X POST http://127.0.0.1:8080/api/links \
+            -H "Content-Type: application/json" \
+            --data '{"url":"https://example.com"}' \
+            -o /tmp/linker-response.json \
             -D "$response_headers"
-
           grep -i "^Location:" "$response_headers"
-          grep -i "/r/" "$response_headers"
-
-      - name: Validate healthz is not treated as short URL
-        run: |
-          response=$(curl -s http://127.0.0.1:8080/healthz)
-          echo "$response"
-          echo "$response" | grep '"status"'
-          echo "$response" | grep '"database"'
 
       - name: Stop application
         if: always()
         run: |
           if [ -f linker.pid ]; then kill $(cat linker.pid) || true; fi
+
+      - name: Upload runtime artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linker-python-runtime
+          path: dist/linker-python.zip
 
       - name: Upload application logs
         if: always()
@@ -118,223 +122,3 @@ jobs:
           name: linker-logs
           path: linker.log
           if-no-files-found: ignore
-
-  publish-image:
-    name: Build and publish Docker image to GitHub Packages
-    runs-on: ubuntu-latest
-    needs: build-and-test
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-
-    permissions:
-      contents: read
-      packages: write
-
-    env:
-      IMAGE_NAME: ghcr.io/${{ github.repository }}
-      HOST: 127.0.0.1
-      PORT: 8080
-      DB_ENGINE: mysql
-
-      MYSQL_HOST: ${{ vars.MYSQL_HOST }}
-      MYSQL_PORT: ${{ vars.MYSQL_PORT }}
-      MYSQL_DATABASE: ${{ vars.MYSQL_DATABASE }}
-      MYSQL_USER: ${{ vars.MYSQL_USER }}
-      MYSQL_PWD: ${{ secrets.MYSQL_PWD }}
-
-      OTEL_SERVICE_NAME: ${{ vars.OTEL_SERVICE_NAME }}
-      OTEL_TRACES_ENABLED: "true"
-      OTEL_METRICS_ENABLED: "true"
-      OTEL_EXPORTER_OTLP_ENDPOINT: ${{ vars.OTEL_EXPORTER_OTLP_ENDPOINT }}
-      OTEL_EXPORTER_OTLP_HEADERS: ${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}
-      LAUNCHDARKLY_SDK_KEY: ${{ secrets.LAUNCHDARKLY_SDK_KEY }}
-
-    steps:
-      - name: Checkout source code
-        uses: actions/checkout@v4
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ env.IMAGE_NAME }}:latest
-            ${{ env.IMAGE_NAME }}:${{ github.sha }}
-
-  Build:
-    name: Build deployment artifact
-    runs-on: ubuntu-latest
-    needs: build-and-test
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-
-    steps:
-      - name: Checkout source code
-        uses: actions/checkout@v4
-
-      - name: Package application files
-        run: |
-          mkdir -p artifact
-
-          # Empaqueta todos los archivos Python de la raíz, incluido web.py y telemetry.py si existe.
-          cp *.py artifact/
-          cp requirements.txt artifact/
-
-          if [ -d views ]; then cp -r views artifact/; fi
-          if [ -d static ]; then cp -r static artifact/; fi
-          if [ -f README.md ]; then cp README.md artifact/; fi
-          if [ -f DOCUMENTO.md ]; then cp DOCUMENTO.md artifact/; fi
-
-      - name: Validate packaged artifact
-        run: |
-          test -f artifact/app.py
-          test -f artifact/web.py
-          test -f artifact/config.py
-          test -f artifact/database.py
-          test -f artifact/link_service.py
-          test -f artifact/requirements.txt
-
-          grep -n "healthz" artifact/web.py
-
-          if grep -n '@app.get("/<short_id>")' artifact/web.py; then
-            echo "ERROR: El artefacto contiene la ruta problemática /<short_id>"
-            exit 1
-          fi
-
-          echo "Deployment artifact is valid."
-
-      - name: Upload deployment artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: linker-app
-          path: artifact
-          retention-days: 7
-
-  deploy-prod:
-    name: Deploy to Prod
-    runs-on: ubuntu-latest
-    needs: Build
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-    environment:
-      name: production
-
-    env:
-      DEPLOYMENT_PRIVATE_KEY: ${{ secrets.DEPLOYMENT_PRIVATE_KEY }}
-      DEPLOYMENT_PUBLIC_KEY: ${{ secrets.DEPLOYMENT_PUBLIC_KEY }}
-      OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
-      OCI_CLI_TENANCY: ${{ secrets.OCI_CLI_TENANCY }}
-      OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CLI_FINGERPRINT }}
-      OCI_CLI_KEY_CONTENT: ${{ secrets.OCI_CLI_KEY_CONTENT }}
-      OCI_CLI_REGION: ${{ vars.OCI_CLI_REGION }}
-      OCI_BASTION_OCID: ${{ vars.OCI_BASTION_OCID }}
-
-    steps:
-      - name: Deploy
-        uses: co-eiv-devsecops/material-curso/actions/oci-bastion-deploy@main
-        with:
-          instance-id: ${{ vars.OCI_INSTANCE_OCID }}
-          artifact-name: linker-app
-          target-path: /tmp/deploy/linker/${{ github.sha }}
-          target-os-username: ubuntu
-          oci-cli-cache-version: v1
-          script: |
-            set -euo pipefail
-
-            echo "Preparando directorio de despliegue..."
-            sudo rm -rf /opt/linker-python
-            sudo mkdir -p /opt/linker-python
-            sudo cp -r "$DEPLOY_PATH"/. /opt/linker-python/
-            sudo chown -R ubuntu:ubuntu /opt/linker-python
-
-            echo "Validando archivo web.py desplegado..."
-            test -f /opt/linker-python/web.py
-            grep -n "healthz" /opt/linker-python/web.py
-
-            if grep -n '@app.get("/<short_id>")' /opt/linker-python/web.py; then
-              echo "ERROR: La versión desplegada contiene @app.get(\"/<short_id>\")"
-              exit 1
-            fi
-
-            echo "Creando archivo .env de producción..."
-            sudo tee /opt/linker-python/.env > /dev/null <<'ENVEOF'
-            HOST=0.0.0.0
-            PORT=8080
-            DB_ENGINE=mysql
-
-            MYSQL_HOST=${{ vars.MYSQL_HOST }}
-            MYSQL_PORT=${{ vars.MYSQL_PORT }}
-            MYSQL_DATABASE=${{ vars.MYSQL_DATABASE }}
-            MYSQL_USER=${{ vars.MYSQL_USER }}
-            MYSQL_PWD=${{ secrets.MYSQL_PWD }}
-
-            OTEL_SERVICE_NAME=${{ vars.OTEL_SERVICE_NAME }}
-            OTEL_TRACES_ENABLED=true
-            OTEL_METRICS_ENABLED=true
-            OTEL_EXPORTER_OTLP_ENDPOINT=${{ vars.OTEL_EXPORTER_OTLP_ENDPOINT }}
-            OTEL_EXPORTER_OTLP_HEADERS="${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}"
-            LAUNCHDARKLY_SDK_KEY=${{ secrets.LAUNCHDARKLY_SDK_KEY }}
-            ENVEOF
-
-            sudo chown ubuntu:ubuntu /opt/linker-python/.env
-            sudo chmod 600 /opt/linker-python/.env
-
-            echo "Instalando dependencias..."
-            cd /opt/linker-python
-            python3 -m venv .venv
-            .venv/bin/python -m pip install --upgrade pip
-            .venv/bin/pip install -r requirements.txt
-
-            echo "Configurando servicio systemd..."
-            sudo tee /etc/systemd/system/linker-python.service > /dev/null <<'SERVICEEOF'
-            [Unit]
-            Description=Linker Python URL Shortener
-            After=network.target
-
-            [Service]
-            User=ubuntu
-            WorkingDirectory=/opt/linker-python
-            EnvironmentFile=/opt/linker-python/.env
-            ExecStart=/opt/linker-python/.venv/bin/python /opt/linker-python/app.py
-            Restart=always
-            RestartSec=5
-            KillSignal=SIGINT
-            SyslogIdentifier=linker-python
-
-            [Install]
-            WantedBy=multi-user.target
-            SERVICEEOF
-
-            sudo systemctl daemon-reload
-            sudo systemctl enable linker-python
-            sudo systemctl restart linker-python
-
-            sleep 8
-
-            echo "Validando /health..."
-            curl --fail http://localhost:8080/health
-
-            echo "Validando /healthz..."
-            curl --fail http://localhost:8080/healthz
-
-            echo "Validando creación de enlace corto con prefijo /r/..."
-            response_headers=$(mktemp)
-            curl --fail -i -X POST http://localhost:8080/link \
-              -H "Content-Type: application/x-www-form-urlencoded" \
-              --data "url=https://example.com" \
-              -o /tmp/linker-prod-response.txt \
-              -D "$response_headers"
-
-            grep -i "^Location:" "$response_headers"
-            grep -i "/r/" "$response_headers"
-
-            echo "Despliegue finalizado correctamente."
-
