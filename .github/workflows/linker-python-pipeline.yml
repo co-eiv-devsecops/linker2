@@ -77,6 +77,19 @@ jobs:
           echo $! > linker.pid
           sleep 5
 
+      - name: Validate Flask route map in CI
+        run: |
+          python - <<'PY'
+          from web import create_app
+          app = create_app(config={"TESTING": True})
+          routes = sorted(str(rule) for rule in app.url_map.iter_rules())
+          print("\n".join(routes))
+          assert "/health" in routes
+          assert "/healthz" in routes
+          assert "/r/<short_id>" in routes
+          assert "/<short_id>" not in routes
+          PY
+
       - name: Validate health endpoint
         run: |
           curl --fail http://127.0.0.1:8080/health
@@ -267,13 +280,13 @@ jobs:
             HOST=0.0.0.0
             PORT=8080
             DB_ENGINE=mysql
-            
+
             MYSQL_HOST=${{ vars.MYSQL_HOST }}
             MYSQL_PORT=${{ vars.MYSQL_PORT }}
             MYSQL_DATABASE=${{ vars.MYSQL_DATABASE }}
             MYSQL_USER=${{ vars.MYSQL_USER }}
             MYSQL_PWD=${{ secrets.MYSQL_PWD }}
-            
+
             OTEL_SERVICE_NAME=${{ vars.OTEL_SERVICE_NAME }}
             OTEL_TRACES_ENABLED=true
             OTEL_METRICS_ENABLED=true
@@ -287,16 +300,9 @@ jobs:
 
             cd /opt/linker-python
 
-            echo "Verificando soporte de entornos virtuales..."
-            if ! python3 -m venv /tmp/linker-venv-test; then
-              echo "python3-venv no está instalado. Instalando dependencias del sistema..."
-              sudo apt-get update
-              sudo apt-get install -y python3-venv python3-pip
-            else
-              echo "python3-venv ya está disponible."
-            fi
-
-            sudo rm -rf /tmp/linker-venv-test
+            echo "Instalando dependencias del sistema necesarias..."
+            sudo apt-get update
+            sudo apt-get install -y python3-venv python3-pip psmisc
 
             echo "Creando entorno virtual limpio..."
             rm -rf .venv
@@ -306,8 +312,22 @@ jobs:
             .venv/bin/python -m pip install --upgrade pip
             .venv/bin/pip install -r requirements.txt
 
+            echo "Validando rutas Flask desde el artefacto desplegado antes de iniciar systemd..."
+            .venv/bin/python - <<'PY'
+            from web import create_app
+            app = create_app(config={"TESTING": True})
+            routes = sorted(str(rule) for rule in app.url_map.iter_rules())
+            print("\n".join(routes))
+            if "/healthz" not in routes:
+                raise SystemExit("ERROR: /healthz no está registrado")
+            if "/<short_id>" in routes:
+                raise SystemExit("ERROR: /<short_id> sigue registrado")
+            if "/r/<short_id>" not in routes:
+                raise SystemExit("ERROR: /r/<short_id> no está registrado")
+            PY
+
             echo "Creando servicio systemd..."
-            sudo tee /etc/systemd/system/linker-python.service > /dev/null <<'EOF'
+            sudo tee /etc/systemd/system/linker-python.service > /dev/null <<'EOF_SERVICE'
             [Unit]
             Description=Linker Python URL Shortener
             After=network.target
@@ -324,7 +344,12 @@ jobs:
 
             [Install]
             WantedBy=multi-user.target
-            EOF
+            EOF_SERVICE
+
+            echo "Deteniendo servicios/procesos anteriores..."
+            sudo systemctl stop linker-python || true
+            sudo systemctl stop linker || true
+            sudo fuser -k 8080/tcp || true
 
             sudo systemctl daemon-reload
             sudo systemctl enable linker-python
@@ -332,10 +357,21 @@ jobs:
 
             sleep 8
 
+            echo "Estado del servicio linker-python..."
+            sudo systemctl status linker-python --no-pager || true
+
+            echo "Proceso escuchando en 8080..."
+            sudo ss -ltnp | grep ':8080' || true
+
+            echo "Logs recientes..."
+            sudo journalctl -u linker-python -n 80 --no-pager || true
+
             echo "Validando /health..."
+            curl -i http://localhost:8080/health
             curl --fail http://localhost:8080/health
 
             echo "Validando /healthz..."
+            curl -i http://localhost:8080/healthz
             curl --fail http://localhost:8080/healthz
 
             echo "Despliegue finalizado correctamente."
