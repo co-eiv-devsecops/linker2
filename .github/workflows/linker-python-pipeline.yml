@@ -147,7 +147,7 @@ jobs:
       - name: Package application files
         run: |
           mkdir -p artifact
-          cp -r app.py config.py database.py feature_flags.py link_service.py views.py views requirements.txt artifact/
+          cp -r app.py web.py config.py database.py feature_flags.py link_service.py views.py views requirements.txt artifact/
 
       - name: Upload deployment artifact
         uses: actions/upload-artifact@v4
