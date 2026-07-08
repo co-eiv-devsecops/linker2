@@ -6,6 +6,16 @@ from database import SQLiteLinkRepository
 from feature_flags import is_enabled
 from link_service import LinkService
 
+from opentelemetry import metrics, trace
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+from opentelemetry.sdk.resources import Resource
+
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
 logger = logging.getLogger(__name__)
 
 
@@ -15,6 +25,21 @@ def configure_logging(app):
     app.logger.setLevel(app.config["LOG_LEVEL"])
     app.logger.propagate = False
 
+def configure_metrics(app):
+    resource = Resource.create({"service.name": "linker-python"})
+    
+    exporter = OTLPMetricExporter()
+    reader = PeriodicExportingMetricReader(exporter)
+    
+    provider = MeterProvider(resource=resource, metric_readers=[reader])
+    metrics.set_meter_provider(provider)
+
+def configure_tracing(app):
+    resource = Resource.create({"service.name": "linker-python"})
+    provider = TracerProvider(resource=resource)
+    processor = BatchSpanProcessor(OTLPSpanExporter())
+    provider.add_span_processor(processor)
+    trace.set_tracer_provider(provider)
 
 def public_base_url():
     host = request.headers.get("Host", request.host or f"{HOST}:{PORT}")
@@ -34,6 +59,8 @@ def create_app(config=None, repository=None, link_service=None, flag_checker=is_
         app.config.update(config)
 
     configure_logging(app)
+    configure_metrics(app)
+    configure_tracing(app)
 
     repository = repository or SQLiteLinkRepository(app.config["DATABASE"])
     if link_service is None:
@@ -67,7 +94,7 @@ def create_app(config=None, repository=None, link_service=None, flag_checker=is_
             response.headers["Content-Type"] = "text/plain; charset=utf-8"
             return response
         except Exception:
-            logger.exception("Failed to create short link for url=%s", url)
+            logger.error("Failed to create short link for url=%s due to internal error", url, exc_info=True)
             abort(500)
 
         logger.info("Created short_id=%s -> %s client=%s", short_id, url, request.remote_addr)
@@ -82,7 +109,7 @@ def create_app(config=None, repository=None, link_service=None, flag_checker=is_
             service = app.extensions["linker_service"]
             url = service.find_url(short_id)
         except Exception:
-            logger.exception("Failed to resolve short_id=%s", short_id)
+            logger.error("Failed to resolve short_id=%s due to internal processing error", short_id, exc_info=True)
             abort(500)
 
         if url is None:

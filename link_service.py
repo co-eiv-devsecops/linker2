@@ -1,9 +1,58 @@
 import secrets
 import re
+import logging
+import time
 from urllib.parse import urlparse
+from opentelemetry import metrics, trace
 
+logger = logging.getLogger(__name__)
 
 CUSTOM_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{3,32}$")
+
+
+meter = metrics.get_meter(__name__)
+tracer = trace.get_tracer(__name__)
+
+# Counters
+links_created_counter = meter.create_counter(
+    "links_created_total",
+    description="Total number of successfully created short links"
+)
+links_failed_counter = meter.create_counter(
+    "links_failed_total",
+    description="Total number of failed attempts to create a short link"
+)
+
+# Histograms
+link_creation_duration = meter.create_histogram(
+    "link_creation_duration_seconds",
+    description="Total processing time for link creation"
+)
+url_length_histogram = meter.create_histogram(
+    "original_url_length_characters",
+    description="Distribution of character counts in original URLs"
+)
+
+# Observable Gauges 
+service_start_time = time.time()
+last_creation_timestamp = 0
+
+def get_uptime_callback(options):
+    yield metrics.Observation(time.time() - service_start_time)
+
+def get_last_link_timestamp_callback(options):
+    yield metrics.Observation(last_creation_timestamp)
+
+uptime_gauge = meter.create_observable_gauge(
+    "service_uptime_seconds",
+    callbacks=[get_uptime_callback],
+    description="Elapsed time in seconds since the service module started"
+)
+last_link_gauge = meter.create_observable_gauge(
+    "last_link_created_timestamp",
+    callbacks=[get_last_link_timestamp_callback],
+    description="Epoch timestamp of the last time a link was created"
+)
 
 
 def is_valid_url(url):
@@ -54,28 +103,86 @@ class LinkService:
         self.id_generator = id_generator
 
     def create_short_link(self, url, custom_id=None):
-        clean_url = (url or "").strip()
-        if not is_valid_url(clean_url):
-            raise ValueError("Invalid or missing URL")
+        global last_creation_timestamp
+        start_process_time = time.time()
 
-        if custom_id:
-            short_id = custom_id.strip()
-            if not is_valid_custom_id(short_id):
-                raise ValueError("Invalid custom alias")
-            if self.repository.link_exists(short_id):
-                raise ValueError("Custom alias already exists")
-        else:
-            while True:
-                short_id = self.id_generator()
-                if not self.repository.link_exists(short_id):
-                    break
+        # Trace parent span: Link creation flow
+        with tracer.start_as_current_span("trace_create_link_flow") as parent_span:
+            clean_url = (url or "").strip()
+            parent_span.set_attribute("link.original_url", clean_url) 
 
-        self.repository.save_link(short_id, clean_url)
-        return short_id
+            url_length_histogram.record(len(clean_url))
+
+            logger.debug("Starting the process of creating a short link for the URL: %s", clean_url)
+            
+            if not is_valid_url(clean_url):
+                logger.warning("Attempt to register a URL with an invalid or empty format: %s", clean_url)
+                logger.error("The provided URL does not meet the minimum HTTP/HTTPS requirements.")
+                links_failed_counter.add(1, {"reason": "invalid_url"})
+                parent_span.set_attribute("error", True)
+                raise ValueError("Invalid or missing URL")
+
+            if custom_id:
+                short_id = custom_id.strip()
+                if not is_valid_custom_id(short_id):
+                    logger.error("Business error: The custom alias '%s' does not match the allowed regex pattern.", short_id)
+                    links_failed_counter.add(1, {"reason": "invalid_alias_format"})
+                    parent_span.set_attribute("error", True)
+                    raise ValueError("Invalid custom alias")
+                if self.repository.link_exists(short_id):
+                    logger.warning("The requested custom alias is already in use: %s", short_id)
+                    links_failed_counter.add(1, {"reason": "alias_conflict"})
+                    parent_span.set_attribute("error", True)
+                    raise ValueError("Custom alias already exists")
+            else:
+                logger.debug("Generating a unique random identifier and starting the duplicate verification loop")
+                while True:
+                    short_id = self.id_generator()
+                    if not self.repository.link_exists(short_id):
+                        break
+            
+            try:
+                # Trace child span: Database persistence
+                with tracer.start_as_current_span("span_save_to_database") as child_span_db:
+                    child_span_db.set_attribute("db.operation", "insert")
+                    child_span_db.set_attribute("link.short_id", short_id)
+
+                    self.repository.save_link(short_id, clean_url)
+                
+                logger.info("Successful storage mapping completed: %s -> %s", short_id, clean_url)
+                links_created_counter.add(1, {"type": "custom" if custom_id else "auto"})
+                last_creation_timestamp = time.time() 
+                link_creation_duration.record(time.time() - start_process_time) 
+                return short_id
+            except Exception as e:
+                logger.critical("Catastrophic failure while attempting to write to the database repository: %s", str(e))
+                links_failed_counter.add(1, {"reason": "database_error"})
+                parent_span.record_exception(e)
+                parent_span.set_status(trace.Status(trace.StatusCode.ERROR))
+                raise
 
     def find_url(self, short_id):
-        return self.repository.find_url(short_id)
+        # Trace parent span: Search flow
+        with tracer.start_as_current_span("trace_find_link_flow") as parent_span_find:
+            parent_span_find.set_attribute("link.short_id", short_id)
 
+        try:
+            # Trace child span: Database query
+            with tracer.start_as_current_span("span_query_database") as child_span_query:
+                child_span_query.set_attribute("db.operation", "select")
+                    
+                url_found = self.repository.find_url(short_id)
+                    
+                if url_found:
+                    child_span_query.set_attribute("db.result", "found")
+                else:                        
+                    child_span_query.set_attribute("db.result", "not_found")
+                return url_found
+        except Exception as e:
+            logger.critical("Critical system error while querying short_id=%s: %s", short_id, str(e))
+            parent_span_find.record_exception(e)
+            parent_span_find.set_status(trace.Status(trace.StatusCode.ERROR))
+            raise
 
 def create_short_link(connection, url, id_generator=generate_id, custom_id=None):
     service = LinkService(_ConnectionRepository(connection), id_generator=id_generator)
