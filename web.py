@@ -1,4 +1,5 @@
 import logging
+import os
 from urllib.parse import urlparse
 
 from flask import Flask, abort, jsonify, make_response, render_template, request
@@ -12,23 +13,23 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import Status, StatusCode
 
-from config import (
-    DATABASE,
-    DB_ENGINE,
-    HOST,
-    LOG_LEVEL,
-    OTEL_METRICS_ENABLED,
-    OTEL_SERVICE_NAME,
-    OTEL_TRACES_ENABLED,
-    PORT,
-)
-from database import create_repository
+from config import DATABASE, HOST, LOG_LEVEL, PORT
+from database import SQLiteLinkRepository
 from feature_flags import is_enabled
 from link_service import LinkService
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("linker.web")
 _telemetry_configured = False
+
+RESERVED_PATHS = {
+    "health",
+    "healthz",
+    "metrics",
+    "link",
+    "favicon.ico",
+    "robots.txt",
+}
 
 
 def configure_logging(app):
@@ -37,33 +38,37 @@ def configure_logging(app):
     app.logger.propagate = False
 
 
-def configure_tracing(app):
-    resource = Resource.create({"service.name": app.config["OTEL_SERVICE_NAME"]})
-    provider = TracerProvider(resource=resource)
-    provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
-    trace.set_tracer_provider(provider)
-
-
 def configure_metrics(app):
-    resource = Resource.create({"service.name": app.config["OTEL_SERVICE_NAME"]})
+    resource = Resource.create({"service.name": app.config.get("OTEL_SERVICE_NAME", "linker-python")})
     exporter = OTLPMetricExporter()
     reader = PeriodicExportingMetricReader(exporter)
     provider = MeterProvider(resource=resource, metric_readers=[reader])
     metrics.set_meter_provider(provider)
 
 
+def configure_tracing(app):
+    resource = Resource.create({"service.name": app.config.get("OTEL_SERVICE_NAME", "linker-python")})
+    provider = TracerProvider(resource=resource)
+    processor = BatchSpanProcessor(OTLPSpanExporter())
+    provider.add_span_processor(processor)
+    trace.set_tracer_provider(provider)
+
+
 def configure_telemetry(app):
+    """Configure OTLP metrics and traces once for the running application."""
     global _telemetry_configured
 
-    if app.config.get("TESTING") or _telemetry_configured:
+    if app.config.get("TESTING"):
         return
 
-    if app.config.get("OTEL_TRACES_ENABLED"):
-        configure_tracing(app)
+    if _telemetry_configured:
+        return
 
-    if app.config.get("OTEL_METRICS_ENABLED"):
-        configure_metrics(app)
+    if not app.config.get("OTEL_TRACES_ENABLED", True):
+        return
 
+    configure_metrics(app)
+    configure_tracing(app)
     _telemetry_configured = True
 
 
@@ -102,13 +107,11 @@ def create_app(config=None, repository=None, link_service=None, flag_checker=is_
     app = Flask(__name__, template_folder="views")
     app.config.from_mapping(
         DATABASE=DATABASE,
-        DB_ENGINE=DB_ENGINE,
         HOST=HOST,
         PORT=PORT,
         LOG_LEVEL=LOG_LEVEL,
-        OTEL_SERVICE_NAME=OTEL_SERVICE_NAME,
-        OTEL_TRACES_ENABLED=OTEL_TRACES_ENABLED,
-        OTEL_METRICS_ENABLED=OTEL_METRICS_ENABLED,
+        OTEL_SERVICE_NAME=os.getenv("OTEL_SERVICE_NAME", "linker-python"),
+        OTEL_TRACES_ENABLED=os.getenv("OTEL_TRACES_ENABLED", "true").lower() == "true",
     )
 
     if config:
@@ -117,7 +120,7 @@ def create_app(config=None, repository=None, link_service=None, flag_checker=is_
     configure_logging(app)
     configure_telemetry(app)
 
-    repository = repository or create_repository()
+    repository = repository or SQLiteLinkRepository(app.config["DATABASE"])
 
     if link_service is None:
         repository.initialize()
@@ -150,20 +153,18 @@ def create_app(config=None, repository=None, link_service=None, flag_checker=is_
     @app.get("/healthz")
     @app.get("/healthz/")
     def healthz():
-        repository = app.extensions["linker_repository"]
-        db_system = getattr(repository, "db_system", app.config.get("DB_ENGINE", "unknown"))
-
         with tracer.start_as_current_span("linker.healthcheck") as span:
             set_attributes(span, request_metadata())
             span.set_attribute("http.route", "/healthz")
             span.set_attribute("healthcheck.type", "database")
             span.set_attribute("healthcheck.database", True)
-            span.set_attribute("db.system", db_system)
             span.add_event("healthcheck.started")
 
             try:
+                repository = app.extensions["linker_repository"]
+
                 with tracer.start_as_current_span("linker.healthcheck.db.select_1") as db_span:
-                    db_span.set_attribute("db.system", db_system)
+                    db_span.set_attribute("db.system", "sqlite")
                     db_span.set_attribute("db.operation", "SELECT")
                     db_span.set_attribute("db.statement", "SELECT 1")
                     repository.health_check()
@@ -249,6 +250,10 @@ def create_app(config=None, repository=None, link_service=None, flag_checker=is_
 
     @app.get("/r/<short_id>")
     def redirect_short(short_id):
+        if short_id in RESERVED_PATHS:
+            logger.warning("Reserved path received by redirect handler: %s", short_id)
+            abort(404)
+
         with tracer.start_as_current_span("linker.http.redirect") as span:
             set_attributes(span, request_metadata())
             span.set_attribute("http.route", "/r/<short_id>")
