@@ -53,7 +53,7 @@ class WebAppTest(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.headers["Location"], "https://example.test/abc123")
+        self.assertEqual(response.headers["Location"], "https://example.test/r/abc123")
         self.assertEqual(self.repository.find_url("abc123"), "https://example.com")
 
     def test_create_link_uses_custom_alias_when_enabled(self):
@@ -64,27 +64,49 @@ class WebAppTest(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.headers["Location"], "http://example.test/mi_alias")
+        self.assertEqual(response.headers["Location"], "http://example.test/r/mi_alias")
         self.assertEqual(self.repository.find_url("mi_alias"), "https://example.com")
 
     def test_redirects_to_original_url(self):
         self.repository.save_link("abc123", "https://example.com")
 
-        response = self.client.get("/abc123")
+        response = self.client.get("/r/abc123")
 
         self.assertEqual(response.status_code, 301)
         self.assertEqual(response.headers["Location"], "https://example.com")
 
     def test_redirect_returns_not_found_for_missing_link(self):
-        response = self.client.get("/missing")
+        response = self.client.get("/r/missing")
 
         self.assertEqual(response.status_code, 404)
+
+    def test_root_short_link_route_is_not_enabled(self):
+        self.repository.save_link("abc123", "https://example.com")
+
+        response = self.client.get("/abc123")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_healthz_is_not_treated_as_short_link(self):
+        response = self.client.get("/healthz")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["database"], "ok")
 
     def test_create_link_returns_internal_error_when_service_fails(self):
         failing_app = create_app(
             config={"TESTING": True},
             repository=self.repository,
-            link_service=type("FailingService", (), {"create_short_link": staticmethod(lambda url, custom_id=None: (_ for _ in ()).throw(RuntimeError("boom"))), "find_url": staticmethod(lambda short_id: None)})(),
+            link_service=type(
+                "FailingService",
+                (),
+                {
+                    "create_short_link": staticmethod(
+                        lambda url, custom_id=None: (_ for _ in ()).throw(RuntimeError("boom"))
+                    ),
+                    "find_url": staticmethod(lambda short_id: None),
+                },
+            )(),
             flag_checker=lambda flag_name, environ=None: False,
         )
 
@@ -96,11 +118,20 @@ class WebAppTest(unittest.TestCase):
         failing_app = create_app(
             config={"TESTING": True},
             repository=self.repository,
-            link_service=type("FailingService", (), {"create_short_link": staticmethod(lambda url, custom_id=None: "abc123"), "find_url": staticmethod(lambda short_id: (_ for _ in ()).throw(RuntimeError("boom")))})(),
+            link_service=type(
+                "FailingService",
+                (),
+                {
+                    "create_short_link": staticmethod(lambda url, custom_id=None: "abc123"),
+                    "find_url": staticmethod(
+                        lambda short_id: (_ for _ in ()).throw(RuntimeError("boom"))
+                    ),
+                },
+            )(),
             flag_checker=lambda flag_name, environ=None: False,
         )
 
-        response = failing_app.test_client().get("/abc123")
+        response = failing_app.test_client().get("/r/abc123")
 
         self.assertEqual(response.status_code, 500)
 

@@ -1,5 +1,5 @@
 name: Linker Python CI
- 
+
 on:
   push:
   pull_request:
@@ -7,71 +7,119 @@ on:
       - main
       - master
   workflow_dispatch:
- 
+
 jobs:
   build-and-test:
     name: Build and validate tests
     runs-on: ubuntu-latest
- 
+
+    env:
+      HOST: 127.0.0.1
+      PORT: 8080
+      DB_ENGINE: sqlite
+      LINKER_DB: /tmp/linker-ci.db
+      DATABASE: /tmp/linker-ci.db
+      OTEL_SERVICE_NAME: linker-python-ci
+      OTEL_TRACES_ENABLED: "false"
+      OTEL_METRICS_ENABLED: "false"
+
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
- 
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
- 
+
       - name: Show Python version
         run: python --version
- 
+
       - name: Validate project structure
         run: |
           test -f app.py
+          test -f web.py
+          test -f config.py
+          test -f database.py
+          test -f link_service.py
           test -f requirements.txt
           test -d tests
- 
+          echo "Project structure is valid."
+
+      - name: Validate healthz route exists
+        run: |
+          grep -n "healthz" web.py
+
+      - name: Validate no root dynamic short route
+        run: |
+          if grep -n '@app.get("/<short_id>")' web.py; then
+            echo "ERROR: No debe existir @app.get(\"/<short_id>\"). Usar solo /r/<short_id>."
+            exit 1
+          fi
+          echo "Route validation passed."
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           if [ -s requirements.txt ]; then pip install -r requirements.txt; fi
- 
+
       - name: Check Python syntax
         run: |
           python -m compileall .
- 
+
       - name: Run unit tests
         run: |
           python -m unittest discover -s tests -p "test_*.py" -v
- 
+
       - name: Start application
-        env:
-          PORT: 8080
-          LINKER_DB: /tmp/linker-ci.db
         run: |
           python app.py > linker.log 2>&1 &
           echo $! > linker.pid
-          sleep 3
- 
+          sleep 5
+
+      - name: Validate Flask route map in CI
+        run: |
+          python - <<'PY'
+          from web import create_app
+          app = create_app(config={"TESTING": True})
+          routes = sorted(str(rule) for rule in app.url_map.iter_rules())
+          print("\n".join(routes))
+          assert "/health" in routes
+          assert "/healthz" in routes
+          assert "/r/<short_id>" in routes
+          assert "/<short_id>" not in routes
+          PY
+
       - name: Validate health endpoint
         run: |
           curl --fail http://127.0.0.1:8080/health
- 
+
+      - name: Validate healthz endpoint
+        run: |
+          curl --fail http://127.0.0.1:8080/healthz
+
       - name: Validate link creation endpoint
         run: |
           response_headers=$(mktemp)
+
           curl --fail -i -X POST http://127.0.0.1:8080/link \
             -H "Content-Type: application/x-www-form-urlencoded" \
             --data "url=https://example.com" \
             -o /tmp/linker-response.txt \
             -D "$response_headers"
+
           grep -i "^Location:" "$response_headers"
- 
+          grep -i "/r/" "$response_headers"
+
+      - name: Validate reserved healthz is not treated as short URL
+        run: |
+          curl --fail http://127.0.0.1:8080/healthz
+
       - name: Stop application
         if: always()
         run: |
           if [ -f linker.pid ]; then kill $(cat linker.pid) || true; fi
- 
+
       - name: Upload application logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -108,8 +156,6 @@ jobs:
       OTEL_EXPORTER_OTLP_ENDPOINT: ${{ vars.OTEL_EXPORTER_OTLP_ENDPOINT }}
       OTEL_EXPORTER_OTLP_HEADERS: ${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}
       LAUNCHDARKLY_SDK_KEY: ${{ secrets.LAUNCHDARKLY_SDK_KEY }}
-      
-      
 
     steps:
       - name: Checkout source code
@@ -147,7 +193,35 @@ jobs:
       - name: Package application files
         run: |
           mkdir -p artifact
-          cp -r app.py config.py database.py feature_flags.py link_service.py views.py views requirements.txt artifact/
+
+          cp app.py artifact/
+          cp web.py artifact/
+          cp config.py artifact/
+          cp database.py artifact/
+          cp feature_flags.py artifact/
+          cp link_service.py artifact/
+          cp requirements.txt artifact/
+
+          if [ -f views.py ]; then cp views.py artifact/; fi
+          if [ -d views ]; then cp -r views artifact/; fi
+
+      - name: Validate packaged artifact
+        run: |
+          test -f artifact/app.py
+          test -f artifact/web.py
+          test -f artifact/config.py
+          test -f artifact/database.py
+          test -f artifact/link_service.py
+          test -f artifact/requirements.txt
+
+          grep -n "healthz" artifact/web.py
+
+          if grep -n '@app.get("/<short_id>")' artifact/web.py; then
+            echo "ERROR: El artefacto contiene la ruta problemática /<short_id>"
+            exit 1
+          fi
+
+          echo "Deployment artifact is valid."
 
       - name: Upload deployment artifact
         uses: actions/upload-artifact@v4
@@ -163,6 +237,7 @@ jobs:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     environment:
       name: production
+
     env:
       DEPLOYMENT_PRIVATE_KEY: ${{ secrets.DEPLOYMENT_PRIVATE_KEY }}
       DEPLOYMENT_PUBLIC_KEY: ${{ secrets.DEPLOYMENT_PUBLIC_KEY }}
@@ -185,11 +260,74 @@ jobs:
           script: |
             set -euo pipefail
 
+            echo "Preparando directorio de despliegue..."
             sudo mkdir -p /opt/linker-python
+            sudo rm -rf /opt/linker-python/*
             sudo cp -r "$DEPLOY_PATH"/. /opt/linker-python/
             sudo chown -R ubuntu:ubuntu /opt/linker-python
 
-            sudo tee /etc/systemd/system/linker-python.service > /dev/null <<'EOF'
+            echo "Validando archivo web.py desplegado..."
+            test -f /opt/linker-python/web.py
+            grep -n "healthz" /opt/linker-python/web.py
+
+            if grep -n '@app.get("/<short_id>")' /opt/linker-python/web.py; then
+              echo "ERROR: La versión desplegada contiene @app.get(\"/<short_id>\")"
+              exit 1
+            fi
+
+            echo "Creando archivo .env de producción..."
+            sudo tee /opt/linker-python/.env > /dev/null <<'EOF_ENV'
+            HOST=0.0.0.0
+            PORT=8080
+            DB_ENGINE=mysql
+
+            MYSQL_HOST=${{ vars.MYSQL_HOST }}
+            MYSQL_PORT=${{ vars.MYSQL_PORT }}
+            MYSQL_DATABASE=${{ vars.MYSQL_DATABASE }}
+            MYSQL_USER=${{ vars.MYSQL_USER }}
+            MYSQL_PWD=${{ secrets.MYSQL_PWD }}
+
+            OTEL_SERVICE_NAME=${{ vars.OTEL_SERVICE_NAME }}
+            OTEL_TRACES_ENABLED=true
+            OTEL_METRICS_ENABLED=true
+            OTEL_EXPORTER_OTLP_ENDPOINT=${{ vars.OTEL_EXPORTER_OTLP_ENDPOINT }}
+            OTEL_EXPORTER_OTLP_HEADERS=${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}
+            LAUNCHDARKLY_SDK_KEY=${{ secrets.LAUNCHDARKLY_SDK_KEY }}
+            EOF_ENV
+
+            sudo chown ubuntu:ubuntu /opt/linker-python/.env
+            sudo chmod 600 /opt/linker-python/.env
+
+            cd /opt/linker-python
+
+            echo "Instalando dependencias del sistema necesarias..."
+            sudo apt-get update
+            sudo apt-get install -y python3-venv python3-pip psmisc
+
+            echo "Creando entorno virtual limpio..."
+            rm -rf .venv
+            python3 -m venv .venv
+
+            echo "Instalando dependencias de Python..."
+            .venv/bin/python -m pip install --upgrade pip
+            .venv/bin/pip install -r requirements.txt
+
+            echo "Validando rutas Flask desde el artefacto desplegado antes de iniciar systemd..."
+            .venv/bin/python - <<'PY'
+            from web import create_app
+            app = create_app(config={"TESTING": True})
+            routes = sorted(str(rule) for rule in app.url_map.iter_rules())
+            print("\n".join(routes))
+            if "/healthz" not in routes:
+                raise SystemExit("ERROR: /healthz no está registrado")
+            if "/<short_id>" in routes:
+                raise SystemExit("ERROR: /<short_id> sigue registrado")
+            if "/r/<short_id>" not in routes:
+                raise SystemExit("ERROR: /r/<short_id> no está registrado")
+            PY
+
+            echo "Creando servicio systemd..."
+            sudo tee /etc/systemd/system/linker-python.service > /dev/null <<'EOF_SERVICE'
             [Unit]
             Description=Linker Python URL Shortener
             After=network.target
@@ -197,9 +335,8 @@ jobs:
             [Service]
             User=ubuntu
             WorkingDirectory=/opt/linker-python
-            Environment=PORT=8080
-            Environment=LINKER_DB=/opt/linker-python/linker.db
-            ExecStart=/usr/bin/python3 /opt/linker-python/app.py
+            EnvironmentFile=/opt/linker-python/.env
+            ExecStart=/opt/linker-python/.venv/bin/python /opt/linker-python/app.py
             Restart=always
             RestartSec=5
             KillSignal=SIGINT
@@ -207,11 +344,34 @@ jobs:
 
             [Install]
             WantedBy=multi-user.target
-            EOF
+            EOF_SERVICE
+
+            echo "Deteniendo servicios/procesos anteriores..."
+            sudo systemctl stop linker-python || true
+            sudo systemctl stop linker || true
+            sudo fuser -k 8080/tcp || true
 
             sudo systemctl daemon-reload
             sudo systemctl enable linker-python
             sudo systemctl restart linker-python
 
-            sleep 2
+            sleep 8
+
+            echo "Estado del servicio linker-python..."
+            sudo systemctl status linker-python --no-pager || true
+
+            echo "Proceso escuchando en 8080..."
+            sudo ss -ltnp | grep ':8080' || true
+
+            echo "Logs recientes..."
+            sudo journalctl -u linker-python -n 80 --no-pager || true
+
+            echo "Validando /health..."
+            curl -i http://localhost:8080/health
             curl --fail http://localhost:8080/health
+
+            echo "Validando /healthz..."
+            curl -i http://localhost:8080/healthz
+            curl --fail http://localhost:8080/healthz
+
+            echo "Despliegue finalizado correctamente."
