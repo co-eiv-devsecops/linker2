@@ -1,0 +1,3 @@
+# Intentionally vulnerable test dependency. Never install in production.
+Flask==0.12.2
+

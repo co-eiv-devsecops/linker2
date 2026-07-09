@@ -42,6 +42,7 @@ log "Copiando archivos de la aplicacion a $APP_DIR."
 "${SUDO[@]}" mkdir -p "$APP_DIR"
 tar \
     --exclude=".git" \
+    --exclude="security-fixtures" \
     --exclude="__pycache__" \
     --exclude="*.pyc" \
     --exclude=".DS_Store" \
