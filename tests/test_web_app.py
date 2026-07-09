@@ -31,6 +31,14 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Linker Python", response.data)
 
+    def test_responses_include_security_headers(self):
+        response = self.client.get("/")
+
+        self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(response.headers["X-Frame-Options"], "DENY")
+        self.assertEqual(response.headers["Referrer-Policy"], "no-referrer")
+        self.assertIn("frame-ancestors 'none'", response.headers["Content-Security-Policy"])
+
     def test_health_endpoint_returns_json(self):
         response = self.client.get("/health")
 

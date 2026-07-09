@@ -25,6 +25,8 @@ class LinkServiceTest(unittest.TestCase):
         self.assertFalse(is_valid_url("ftp://example.com"))
         self.assertFalse(is_valid_url("example.com"))
         self.assertFalse(is_valid_url(""))
+        self.assertFalse(is_valid_url("https://user:password@example.com/private"))
+        self.assertFalse(is_valid_url("https://[invalid"))
 
     def test_validates_custom_ids(self):
         self.assertTrue(is_valid_custom_id("equipo_2"))
