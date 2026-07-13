@@ -1,0 +1,10 @@
+# Dependencies for the OCI Functions (Fn Project) deployment.
+# Note: Flask, pytest and prometheus exporter are intentionally excluded — the
+# serverless adapter (serverless.py) reuses the framework-agnostic core only.
+fdk
+python-dotenv
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-exporter-otlp
+launchdarkly-server-sdk
+mysql-connector-python
