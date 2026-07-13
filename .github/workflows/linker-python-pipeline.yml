@@ -205,6 +205,12 @@ jobs:
           if [ -f views.py ]; then cp views.py artifact/; fi
           if [ -d views ]; then cp -r views artifact/; fi
 
+          # Scripts de instalacion remota y pruebas de integracion:
+          # el mismo artefacto se instala igual en el entorno efimero y en blue/green.
+          mkdir -p artifact/scripts
+          cp scripts/remote_install.sh artifact/scripts/
+          cp scripts/integration_tests.sh artifact/scripts/
+
       - name: Validate packaged artifact
         run: |
           test -f artifact/app.py
@@ -230,10 +236,85 @@ jobs:
           path: artifact
           retention-days: 7
 
+  ephemeral-test:
+    name: Ephemeral Test Environment
+    runs-on: ubuntu-latest
+    needs: Build
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+
+    env:
+      DEPLOYMENT_PRIVATE_KEY: ${{ secrets.DEPLOYMENT_PRIVATE_KEY }}
+      DEPLOYMENT_PUBLIC_KEY: ${{ secrets.DEPLOYMENT_PUBLIC_KEY }}
+      OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
+      OCI_CLI_TENANCY: ${{ secrets.OCI_CLI_TENANCY }}
+      OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CLI_FINGERPRINT }}
+      OCI_CLI_KEY_CONTENT: ${{ secrets.OCI_CLI_KEY_CONTENT }}
+      OCI_CLI_REGION: ${{ vars.OCI_CLI_REGION }}
+      OCI_BASTION_OCID: ${{ vars.OCI_BASTION_OCID }}
+      OCI_COMPARTMENT_OCID: ${{ vars.OCI_COMPARTMENT_OCID }}
+      OCI_SUBNET_OCID: ${{ vars.OCI_SUBNET_OCID }}
+      OCI_IMAGE_OCID: ${{ vars.OCI_IMAGE_OCID }}
+      OCI_AVAILABILITY_DOMAIN: ${{ vars.OCI_AVAILABILITY_DOMAIN }}
+      OCI_INSTANCE_SHAPE: ${{ vars.OCI_INSTANCE_SHAPE }}
+      OCI_SHAPE_OCPUS: ${{ vars.OCI_SHAPE_OCPUS }}
+      OCI_SHAPE_MEMORY_GB: ${{ vars.OCI_SHAPE_MEMORY_GB }}
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Prepare OCI CLI
+        uses: oracle-actions/run-oci-cli-command@v1.3.2
+        with:
+          command: '--version'
+          silent: 'true'
+
+      - name: Launch ephemeral instance
+        id: launch
+        env:
+          DISPLAY_NAME: linker-ephemeral-${{ github.run_id }}
+          FREEFORM_TAGS: '{"linker-role": "ephemeral"}'
+        run: bash scripts/oci/launch_instance.sh
+
+      - name: Deploy artifact and run integration tests on ephemeral instance
+        uses: co-eiv-devsecops/material-curso/actions/oci-bastion-deploy@main
+        with:
+          instance-id: ${{ steps.launch.outputs.instance_id }}
+          artifact-name: linker-app
+          target-path: /tmp/deploy/linker-ephemeral/${{ github.sha }}
+          target-os-username: ubuntu
+          oci-cli-cache-version: v1
+          script: |
+            set -euo pipefail
+
+            echo "Configurando entorno efimero autocontenido..."
+            # SQLite local y telemetria apagada: las pruebas no deben tocar
+            # la base de datos ni las metricas de produccion.
+            tee "$DEPLOY_PATH/.env" > /dev/null <<'EOF_ENV'
+            HOST=0.0.0.0
+            PORT=8080
+            DB_ENGINE=sqlite
+            LINKER_DB=/opt/linker-python/linker-ephemeral.db
+            OTEL_TRACES_ENABLED=false
+            OTEL_METRICS_ENABLED=false
+            EOF_ENV
+
+            echo "Instalando Linker en el entorno efimero..."
+            bash "$DEPLOY_PATH/scripts/remote_install.sh"
+
+            echo "Ejecutando pruebas de integracion y funcionalidad..."
+            bash "$DEPLOY_PATH/scripts/integration_tests.sh" http://localhost:8080
+
+      - name: Destroy ephemeral instance
+        if: always()
+        env:
+          INSTANCE_ID: ${{ steps.launch.outputs.instance_id }}
+        run: bash scripts/oci/terminate_instance.sh
+
   deploy-prod:
     name: Deploy to Prod
     runs-on: ubuntu-latest
-    needs: Build
+    needs: ephemeral-test
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     environment:
       name: production
