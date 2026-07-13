@@ -1,0 +1,16 @@
+#cloud-config
+# Configuracion base de toda VM de Linker (efimera, blue o green).
+# La instalacion de la aplicacion la hace scripts/remote_install.sh via Bastion.
+package_update: true
+package_upgrade: false
+packages:
+  - python3-venv
+  - python3-pip
+  - psmisc
+  - iptables-persistent
+  - netfilter-persistent
+runcmd:
+  # Permitir trafico externo al puerto 8080 (las imagenes Ubuntu de OCI lo bloquean por defecto)
+  - iptables -C INPUT -p tcp --dport 8080 -j ACCEPT || iptables -I INPUT -p tcp --dport 8080 -j ACCEPT
+  - netfilter-persistent save
+  - systemctl enable netfilter-persistent
