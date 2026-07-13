@@ -10,6 +10,12 @@ packages:
   - iptables-persistent
   - netfilter-persistent
 runcmd:
+  # Ubuntu 24.04 trae OpenSSH activado por socket: ssh.service queda inactivo
+  # hasta la primera conexion, y el plugin Bastion valida "SSHD Server is
+  # running" antes de procesar sesiones managed SSH. Sin esto, toda sesion
+  # del pipeline queda en CREATING para siempre.
+  - systemctl disable --now ssh.socket || true
+  - systemctl enable --now ssh.service
   # Permitir trafico externo al puerto 8080 (las imagenes Ubuntu de OCI lo bloquean por defecto)
   - iptables -C INPUT -p tcp --dport 8080 -j ACCEPT || iptables -I INPUT -p tcp --dport 8080 -j ACCEPT
   - netfilter-persistent save
