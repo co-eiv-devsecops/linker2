@@ -132,7 +132,7 @@ jobs:
     name: Build and publish Docker image to GitHub Packages
     runs-on: ubuntu-latest
     needs: build-and-test
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
 
     permissions:
       contents: read
@@ -184,7 +184,7 @@ jobs:
     name: Build deployment artifact
     runs-on: ubuntu-latest
     needs: build-and-test
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
 
     steps:
       - name: Checkout source code
@@ -240,7 +240,7 @@ jobs:
     name: Ephemeral Test Environment
     runs-on: ubuntu-latest
     needs: Build
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
 
     env:
       DEPLOYMENT_PRIVATE_KEY: ${{ secrets.DEPLOYMENT_PRIVATE_KEY }}
@@ -317,7 +317,7 @@ jobs:
     name: Blue/Green Deploy to Prod
     runs-on: ubuntu-latest
     needs: ephemeral-test
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     environment:
       name: production
     concurrency:
@@ -476,7 +476,7 @@ jobs:
     name: Grafana Post-Deploy Check
     runs-on: ubuntu-latest
     needs: deploy-blue-green
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
 
     env:
       GRAFANA_URL: ${{ vars.GRAFANA_URL }}
