@@ -11,8 +11,8 @@ import os
 
 from flask import Flask, Response, request
 
-from config import DATABASE, HOST, LOG_LEVEL, PORT
-from database import SQLiteLinkRepository
+from config import DATABASE, DB_ENGINE, HOST, LOG_LEVEL, PORT
+from database import SQLiteLinkRepository, create_repository
 from feature_flags import is_enabled
 from link_service import LinkService
 from linker_app import LinkerApp, LinkerRequest
@@ -70,7 +70,13 @@ def create_app(config=None, repository=None, link_service=None, flag_checker=is_
         testing=app.config.get("TESTING", False),
     )
 
-    repository = repository or SQLiteLinkRepository(app.config["DATABASE"])
+    if repository is None:
+        # El estado debe vivir fuera de la VM (MySQL) para que los despliegues
+        # Blue/Green puedan retirar instancias sin perder los enlaces creados.
+        if DB_ENGINE == "mysql":
+            repository = create_repository()
+        else:
+            repository = SQLiteLinkRepository(app.config["DATABASE"])
 
     if link_service is None:
         repository.initialize()
