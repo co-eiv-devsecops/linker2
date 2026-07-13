@@ -290,7 +290,8 @@ jobs:
             echo "Configurando entorno efimero autocontenido..."
             # SQLite local y telemetria apagada: las pruebas no deben tocar
             # la base de datos ni las metricas de produccion.
-            tee "$DEPLOY_PATH/.env" > /dev/null <<'EOF_ENV'
+            # (sudo: el artefacto se copia como root a DEPLOY_PATH)
+            sudo tee "$DEPLOY_PATH/.env" > /dev/null <<'EOF_ENV'
             HOST=0.0.0.0
             PORT=8080
             DB_ENGINE=sqlite
@@ -381,7 +382,8 @@ jobs:
             set -euo pipefail
 
             echo "Creando archivo .env de produccion..."
-            tee "$DEPLOY_PATH/.env" > /dev/null <<'EOF_ENV'
+            # (sudo: el artefacto se copia como root a DEPLOY_PATH)
+            sudo tee "$DEPLOY_PATH/.env" > /dev/null <<'EOF_ENV'
             HOST=0.0.0.0
             PORT=8080
             DB_ENGINE=mysql
