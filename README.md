@@ -1,6 +1,6 @@
 # Linker Python
 
-![CI](https://github.com/co-eiv-devsecops/linker2/actions/workflows/linker-python-pipeline.yml/badge.svg)
+![CI](https://2.n-la-c.app/r/3Fpf3A)
 
 Implementación en Python del ejercicio **Linker**, una aplicación web sencilla para acortar URL, ahora refactorizada sobre **Flask** con inyección de dependencias en la capa de aplicación y persistencia.
 
