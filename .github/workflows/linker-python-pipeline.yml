@@ -200,6 +200,8 @@ jobs:
           cp database.py artifact/
           cp feature_flags.py artifact/
           cp link_service.py artifact/
+          cp linker_app.py artifact/
+          cp telemetry.py artifact/
           cp requirements.txt artifact/
 
           if [ -f views.py ]; then cp views.py artifact/; fi
@@ -218,7 +220,41 @@ jobs:
           test -f artifact/config.py
           test -f artifact/database.py
           test -f artifact/link_service.py
+          test -f artifact/linker_app.py
+          test -f artifact/telemetry.py
           test -f artifact/requirements.txt
+
+          # El artefacto debe ser autocontenido: si un modulo local que
+          # importa el codigo no viaja en el paquete, fallar aqui y no
+          # despues de haber gastado una VM efimera.
+          python3 - <<'PY'
+          import ast, pathlib, sys
+
+          artifact = pathlib.Path("artifact")
+          local = {p.stem for p in pathlib.Path(".").glob("*.py")}
+          packaged = {p.stem for p in artifact.glob("*.py")}
+          packaged |= {p.name for p in artifact.iterdir() if p.is_dir()}
+
+          missing = set()
+          for source in artifact.glob("*.py"):
+              for node in ast.walk(ast.parse(source.read_text())):
+                  if isinstance(node, ast.Import):
+                      names = [alias.name.split(".")[0] for alias in node.names]
+                  elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                      names = [node.module.split(".")[0]]
+                  else:
+                      continue
+                  for name in names:
+                      if name in local and name not in packaged:
+                          missing.add(f"{source.name} importa '{name}' y no esta en el artefacto")
+
+          if missing:
+              print("ERROR: el artefacto no es autocontenido:")
+              for item in sorted(missing):
+                  print("  -", item)
+              sys.exit(1)
+          print("Artefacto autocontenido: todos los modulos locales incluidos.")
+          PY
 
           grep -n "healthz" artifact/web.py
 
