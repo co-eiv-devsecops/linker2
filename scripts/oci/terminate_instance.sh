@@ -23,11 +23,24 @@ if [[ "$STATE" == "NOT_FOUND" || "$STATE" == "TERMINATED" || "$STATE" == "TERMIN
 fi
 
 log "Terminando instancia $INSTANCE_ID (estado actual: $STATE)..."
+# Sin --wait-for-state: en las versiones recientes del CLI ese flag espera
+# estados del work request (SUCCEEDED, ...), no del ciclo de vida de la
+# instancia, y TERMINATED lo rechaza. Confirmamos el estado con un poll.
 oci compute instance terminate \
   --instance-id "$INSTANCE_ID" \
   --preserve-boot-volume false \
-  --force \
-  --wait-for-state TERMINATED \
-  --wait-interval-seconds 15
+  --force
 
-log "Instancia eliminada."
+log "Esperando confirmacion de la terminacion..."
+for attempt in $(seq 1 40); do
+  STATE="$(oci compute instance get --instance-id "$INSTANCE_ID" \
+    --query 'data."lifecycle-state"' --raw-output 2>/dev/null || echo "NOT_FOUND")"
+  if [[ "$STATE" == "TERMINATING" || "$STATE" == "TERMINATED" || "$STATE" == "NOT_FOUND" ]]; then
+    log "Instancia en estado $STATE. Eliminacion confirmada."
+    exit 0
+  fi
+  sleep 15
+done
+
+echo "[terminate-instance][ERROR] La instancia $INSTANCE_ID sigue en estado $STATE." >&2
+exit 1
