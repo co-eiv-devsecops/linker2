@@ -1,0 +1,37 @@
+name: Pipeline de Lanzamiento
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Estado de la funcionalidad advanced_operations (HEAD/DELETE)'
+        required: true
+        default: 'enable'
+        type: choice
+        options:
+          - enable
+          - disable
+
+jobs:
+  toggle-flag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Modificar Feature Flag en LaunchDarkly vía API
+        run: |
+          VALUE="false"
+          if [ "${{ github.event.inputs.action }}" == "enable" ]; then
+            VALUE="true"
+          fi
+          
+          echo "Cambiando la flag 'advanced_operations' a $VALUE en LaunchDarkly..."
+          
+          curl -X PATCH "https://app.launchdarkly.com/api/v2/flags/default/advanced_operations" \
+            -H "Authorization: ${{ secrets.LAUNCHDARKLY_SDK_KEY }}" \
+            -H "Content-Type: application/json; delta=loop" \
+            -d "[
+              {
+                \"op\": \"replace\",
+                \"path\": \"/environments/production/on\",
+                \"value\": $VALUE
+              }
+            ]"
