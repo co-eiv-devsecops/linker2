@@ -279,7 +279,7 @@ jobs:
         run: bash scripts/oci/launch_instance.sh
 
       - name: Deploy artifact and run integration tests on ephemeral instance
-        uses: co-eiv-devsecops/material-curso/actions/oci-bastion-deploy@main
+        uses: ./.github/actions/oci-bastion-deploy
         with:
           instance-id: ${{ steps.launch.outputs.instance_id }}
           artifact-name: linker-app
@@ -374,7 +374,7 @@ jobs:
           bash scripts/oci/launch_instance.sh
 
       - name: Deploy and QA on inactive environment
-        uses: co-eiv-devsecops/material-curso/actions/oci-bastion-deploy@main
+        uses: ./.github/actions/oci-bastion-deploy
         with:
           instance-id: ${{ steps.launch.outputs.instance_id }}
           artifact-name: linker-app
