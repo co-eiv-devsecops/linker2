@@ -265,3 +265,19 @@ python3 app.py
 export LOG_LEVEL=WARNING
 python3 app.py
 ```
+
+## Separación de Despliegue y Lanzamiento
+
+Este proyecto implementa las metodologías modernas de Continuous Delivery mediante el desacoplamiento total entre el Despliegue Técnico y el Lanzamiento.
+
+### 1. Lanzamiento de nuevas funcionalidades sin necesidad de despliegues
+Las nuevas operaciones HTTP (`HEAD` y `DELETE`) bajo el prefijo `/r/<id>` se encuentran integradas en la lógica del código de `web.py`, pero permanecen en un estado "dormido". Están protegidas mediante la evaluación de una Feature Flag controlada por el SDK de **LaunchDarkly**.
+
+* **Comportamiento en apagado (Default):** Si un cliente intenta invocar `HEAD` o `DELETE`, la aplicación intercepta la petición a nivel de código y retorna un estado `404 Not Found`. El código está físicamente instalado en el servidor (desplegado), pero no existe para el usuario.
+* **Comportamiento en encendido:** Cuando el interruptor remoto se activa en la nube de LaunchDarkly, el SDK notifica en caliente al código de Flask. Automáticamente, las rutas comienzan a responder `200 OK` y ejecutan el borrado o la entrega de metadata. Todo este proceso ocurre en tiempo real y sin necesidad de alterar una sola línea de código, recompilar el proyecto o hacer un nuevo despliegue.
+
+### 2. Acciones diferentes para Despliegue y Lanzamiento
+Para garantizar una separación estricta de responsabilidades, el repositorio cuenta con automatizaciones (pipelines) completamente independientes en GitHub Actions:
+
+1. **Pipeline de Despliegue Técnico (`linker-python-pipeline.yml`):** Es el flujo tradicional. Se activa de manera automatizada tras eventos de integración (como un `push` o un `merge`). 
+2. **Pipeline de Lanzamiento (`release-feature.yml`):** Es un flujo de trabajo independiente activado exclusivamente de manera manual (`workflow_dispatch`) desde la pestaña Actions de GitHub. Su única tarea es realizar una petición segura mutando el estado de la bandera `advanced_operations` a través de la API REST de LaunchDarkly, logrando el lanzamiento seguro en producción con un solo click.
