@@ -112,8 +112,12 @@ while true; do
   sleep 20
 done
 
-# Margen para que el plugin registre el endpoint en el servicio Bastion.
-sleep 30
+# Margen para que el plugin se registre con el servicio Bastion. El estado
+# RUNNING del agente no garantiza que el servicio ya acepte sesiones para
+# esta VM: pedir la sesion demasiado pronto la deja atascada en CREATING.
+BASTION_SETTLE_SECONDS="${BASTION_SETTLE_SECONDS:-180}"
+log "Esperando ${BASTION_SETTLE_SECONDS}s a que el plugin se registre con el servicio Bastion..."
+sleep "$BASTION_SETTLE_SECONDS"
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   {
