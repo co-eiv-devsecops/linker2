@@ -191,14 +191,14 @@ La aplicación queda disponible en `http://localhost:8080`.
 
 Cuando un `push` llega a `main`/`master` y pasa el job `build-and-test`, el workflow ejecuta automáticamente:
 
-1. **`Build`**: empaqueta los archivos necesarios para producción (`app.py`, `config.py`, `database.py`, `link_service.py`, `views.py`, `views/`, `requirements.txt`) y los sube como artefacto de GitHub Actions (`linker-app`).
-2. **`deploy-prod`**: usa la acción reutilizable `co-eiv-devsecops/material-curso/actions/oci-bastion-deploy` para conectarse a la VM del equipo a través de una sesión Bastion administrada de OCI (la VM no tiene IP pública), copiar el artefacto y (re)crear el servicio `systemd` `linker-python` en `/opt/linker-python`, reiniciándolo y verificando `/health`.
+1. **`Build`**: empaqueta los archivos necesarios para producción junto con los scripts de instalación remota y pruebas de integración, y los sube como artefacto de GitHub Actions (`linker-app`).
+2. **`ephemeral-test`**: crea una **VM efímera** en OCI, instala el mismo artefacto que irá a producción, ejecuta healthchecks y pruebas de integración/funcionalidad, y destruye la VM al terminar (pase o falle).
+3. **`deploy-blue-green`**: despliegue **Blue/Green** 🔵🟢 a producción: crea una instancia nueva con el color inactivo, hace QA sobre ella sin tráfico, ejecuta el switchover, valida producción y retira la VM de la versión anterior. Si algo falla, hace rollback automático y elimina la VM nueva.
+4. **`grafana-post-deploy`**: verifica Grafana y registra una anotación del despliegue en los dashboards.
 
-Este job requiere que existan configuradas en el repositorio (Settings → Secrets and variables → Actions):
+El flujo completo, los mecanismos de switchover y las variables/secretos requeridos están documentados en [docs/despliegue.md](./docs/despliegue.md). El monitoreo posterior al despliegue está en [docs/monitoreo.md](./docs/monitoreo.md).
 
-- Secrets: `DEPLOYMENT_PRIVATE_KEY`, `OCI_CLI_USER`, `OCI_CLI_TENANCY`, `OCI_CLI_FINGERPRINT`, `OCI_CLI_KEY_CONTENT`.
-- Variables: `DEPLOYMENT_PUBLIC_KEY`, `OCI_CLI_REGION`, `OCI_BASTION_OCID`, `OCI_INSTANCE_OCID` (el OCID de la VM del equipo).
-- Un **Environment** de GitHub llamado `production` (Settings → Environments), restringido a la rama `main`.
+Además se requiere un **Environment** de GitHub llamado `production` (Settings → Environments), restringido a la rama `main`.
 
 El script de despliegue es idempotente: escribe la unidad de `systemd` en cada corrida, así que no depende de que `scripts/install_vm.sh` se haya ejecutado antes manualmente contra la VM.
 
