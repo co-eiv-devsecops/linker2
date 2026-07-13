@@ -311,13 +311,17 @@ jobs:
           INSTANCE_ID: ${{ steps.launch.outputs.instance_id }}
         run: bash scripts/oci/terminate_instance.sh
 
-  deploy-prod:
-    name: Deploy to Prod
+
+  deploy-blue-green:
+    name: Blue/Green Deploy to Prod
     runs-on: ubuntu-latest
     needs: ephemeral-test
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     environment:
       name: production
+    concurrency:
+      group: linker-production-deploy
+      cancel-in-progress: false
 
     env:
       DEPLOYMENT_PRIVATE_KEY: ${{ secrets.DEPLOYMENT_PRIVATE_KEY }}
@@ -328,12 +332,47 @@ jobs:
       OCI_CLI_KEY_CONTENT: ${{ secrets.OCI_CLI_KEY_CONTENT }}
       OCI_CLI_REGION: ${{ vars.OCI_CLI_REGION }}
       OCI_BASTION_OCID: ${{ vars.OCI_BASTION_OCID }}
+      OCI_COMPARTMENT_OCID: ${{ vars.OCI_COMPARTMENT_OCID }}
+      OCI_SUBNET_OCID: ${{ vars.OCI_SUBNET_OCID }}
+      OCI_IMAGE_OCID: ${{ vars.OCI_IMAGE_OCID }}
+      OCI_AVAILABILITY_DOMAIN: ${{ vars.OCI_AVAILABILITY_DOMAIN }}
+      OCI_INSTANCE_SHAPE: ${{ vars.OCI_INSTANCE_SHAPE }}
+      OCI_SHAPE_OCPUS: ${{ vars.OCI_SHAPE_OCPUS }}
+      OCI_SHAPE_MEMORY_GB: ${{ vars.OCI_SHAPE_MEMORY_GB }}
+      # Mecanismo de switchover: IP flotante o Load Balancer (ver scripts/oci/switch_traffic.sh)
+      OCI_FLOATING_IP_ADDRESS: ${{ vars.OCI_FLOATING_IP_ADDRESS }}
+      OCI_LB_OCID: ${{ vars.OCI_LB_OCID }}
+      OCI_LB_BACKEND_SET: ${{ vars.OCI_LB_BACKEND_SET }}
+      PROD_BASE_URL: ${{ vars.PROD_BASE_URL }}
 
     steps:
-      - name: Deploy
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Prepare OCI CLI
+        uses: oracle-actions/run-oci-cli-command@v1.3.2
+        with:
+          command: '--version'
+          silent: 'true'
+
+      - name: Find current active environment
+        id: active
+        run: bash scripts/oci/find_active_instance.sh
+
+      - name: Launch inactive environment (new instance)
+        id: launch
+        env:
+          DISPLAY_NAME: linker-${{ steps.active.outputs.next_color }}-${{ github.run_number }}
+          FREEFORM_TAGS: '{"linker-role": "candidate", "linker-color": "${{ steps.active.outputs.next_color }}"}'
+        run: |
+          echo "Ambiente activo actual: ${{ steps.active.outputs.active_name || 'ninguno' }} (${{ steps.active.outputs.active_color || 'n/a' }})"
+          echo "Desplegando nueva version en el ambiente inactivo: ${{ steps.active.outputs.next_color }}"
+          bash scripts/oci/launch_instance.sh
+
+      - name: Deploy and QA on inactive environment
         uses: co-eiv-devsecops/material-curso/actions/oci-bastion-deploy@main
         with:
-          instance-id: ${{ vars.OCI_INSTANCE_OCID }}
+          instance-id: ${{ steps.launch.outputs.instance_id }}
           artifact-name: linker-app
           target-path: /tmp/deploy/linker/${{ github.sha }}
           target-os-username: ubuntu
@@ -341,23 +380,8 @@ jobs:
           script: |
             set -euo pipefail
 
-            echo "Preparando directorio de despliegue..."
-            sudo mkdir -p /opt/linker-python
-            sudo rm -rf /opt/linker-python/*
-            sudo cp -r "$DEPLOY_PATH"/. /opt/linker-python/
-            sudo chown -R ubuntu:ubuntu /opt/linker-python
-
-            echo "Validando archivo web.py desplegado..."
-            test -f /opt/linker-python/web.py
-            grep -n "healthz" /opt/linker-python/web.py
-
-            if grep -n '@app.get("/<short_id>")' /opt/linker-python/web.py; then
-              echo "ERROR: La versión desplegada contiene @app.get(\"/<short_id>\")"
-              exit 1
-            fi
-
-            echo "Creando archivo .env de producción..."
-            sudo tee /opt/linker-python/.env > /dev/null <<'EOF_ENV'
+            echo "Creando archivo .env de produccion..."
+            tee "$DEPLOY_PATH/.env" > /dev/null <<'EOF_ENV'
             HOST=0.0.0.0
             PORT=8080
             DB_ENGINE=mysql
@@ -376,83 +400,72 @@ jobs:
             LAUNCHDARKLY_SDK_KEY=${{ secrets.LAUNCHDARKLY_SDK_KEY }}
             EOF_ENV
 
-            sudo chown ubuntu:ubuntu /opt/linker-python/.env
-            sudo chmod 600 /opt/linker-python/.env
+            echo "Instalando Linker en el ambiente inactivo..."
+            bash "$DEPLOY_PATH/scripts/remote_install.sh"
 
-            cd /opt/linker-python
+            echo "QA: healthchecks y pruebas de funcionalidad en el ambiente inactivo..."
+            bash "$DEPLOY_PATH/scripts/integration_tests.sh" http://localhost:8080
 
-            echo "Instalando dependencias del sistema necesarias..."
-            sudo apt-get update
-            sudo apt-get install -y python3-venv python3-pip psmisc
+      - name: Switchover traffic to new environment
+        id: switch
+        env:
+          TARGET_VNIC_ID: ${{ steps.launch.outputs.vnic_id }}
+          TARGET_PRIVATE_IP: ${{ steps.launch.outputs.private_ip }}
+        run: bash scripts/oci/switch_traffic.sh
 
-            echo "Creando entorno virtual limpio..."
-            rm -rf .venv
-            python3 -m venv .venv
+      - name: Validate production after switchover
+        id: validate
+        run: |
+          BASE_URL="${PROD_BASE_URL:-http://2.n-la-c.app}"
+          echo "Validando produccion en $BASE_URL despues del switchover..."
 
-            echo "Instalando dependencias de Python..."
-            .venv/bin/python -m pip install --upgrade pip
-            .venv/bin/pip install -r requirements.txt
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --max-time 10 "$BASE_URL/health" > /dev/null; then
+              echo "Produccion responde /health (intento $attempt)."
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              echo "ERROR: produccion no respondio /health despues del switchover."
+              exit 1
+            fi
+            sleep 5
+          done
 
-            echo "Validando rutas Flask desde el artefacto desplegado antes de iniciar systemd..."
-            .venv/bin/python - <<'PY'
-            from web import create_app
-            app = create_app(config={"TESTING": True})
-            routes = sorted(str(rule) for rule in app.url_map.iter_rules())
-            print("\n".join(routes))
-            if "/healthz" not in routes:
-                raise SystemExit("ERROR: /healthz no está registrado")
-            if "/<short_id>" in routes:
-                raise SystemExit("ERROR: /<short_id> sigue registrado")
-            if "/r/<short_id>" not in routes:
-                raise SystemExit("ERROR: /r/<short_id> no está registrado")
-            PY
+          curl --fail --silent "$BASE_URL/healthz" && echo
+          bash scripts/integration_tests.sh "$BASE_URL"
 
-            echo "Creando servicio systemd..."
-            sudo tee /etc/systemd/system/linker-python.service > /dev/null <<'EOF_SERVICE'
-            [Unit]
-            Description=Linker Python URL Shortener
-            After=network.target
+      - name: Promote new environment to active
+        id: promote
+        run: |
+          echo "Marcando la nueva instancia como ambiente activo (${{ steps.active.outputs.next_color }})..."
+          oci compute instance update \
+            --instance-id "${{ steps.launch.outputs.instance_id }}" \
+            --freeform-tags '{"linker-role": "active", "linker-color": "${{ steps.active.outputs.next_color }}"}' \
+            --force
 
-            [Service]
-            User=ubuntu
-            WorkingDirectory=/opt/linker-python
-            EnvironmentFile=/opt/linker-python/.env
-            ExecStart=/opt/linker-python/.venv/bin/python /opt/linker-python/app.py
-            Restart=always
-            RestartSec=5
-            KillSignal=SIGINT
-            SyslogIdentifier=linker-python
+      - name: Retire previous environment (terminate old VM)
+        if: steps.active.outputs.active_id != ''
+        env:
+          INSTANCE_ID: ${{ steps.active.outputs.active_id }}
+        run: |
+          echo "Switchover exitoso: retirando la version anterior (${{ steps.active.outputs.active_name }})..."
+          bash scripts/oci/terminate_instance.sh
 
-            [Install]
-            WantedBy=multi-user.target
-            EOF_SERVICE
+      - name: Rollback on failure (terminate new VM)
+        if: failure() && steps.launch.outputs.instance_id != '' && steps.promote.outcome != 'success'
+        env:
+          INSTANCE_ID: ${{ steps.launch.outputs.instance_id }}
+          TARGET_VNIC_ID: ${{ steps.active.outputs.active_vnic_id }}
+          TARGET_PRIVATE_IP: ${{ steps.active.outputs.active_ip }}
+        run: |
+          echo "El despliegue fallo: ejecutando rollback."
 
-            echo "Deteniendo servicios/procesos anteriores..."
-            sudo systemctl stop linker-python || true
-            sudo systemctl stop linker || true
-            sudo fuser -k 8080/tcp || true
+          if [ "${{ steps.switch.outcome }}" = "success" ] && [ -n "${{ steps.active.outputs.active_vnic_id }}" ]; then
+            echo "El trafico ya se habia cambiado: regresandolo al ambiente anterior (${{ steps.active.outputs.active_color }})..."
+            bash scripts/oci/switch_traffic.sh
+          fi
 
-            sudo systemctl daemon-reload
-            sudo systemctl enable linker-python
-            sudo systemctl restart linker-python
+          echo "Eliminando la VM con la nueva version..."
+          bash scripts/oci/terminate_instance.sh
 
-            sleep 8
-
-            echo "Estado del servicio linker-python..."
-            sudo systemctl status linker-python --no-pager || true
-
-            echo "Proceso escuchando en 8080..."
-            sudo ss -ltnp | grep ':8080' || true
-
-            echo "Logs recientes..."
-            sudo journalctl -u linker-python -n 80 --no-pager || true
-
-            echo "Validando /health..."
-            curl -i http://localhost:8080/health
-            curl --fail http://localhost:8080/health
-
-            echo "Validando /healthz..."
-            curl -i http://localhost:8080/healthz
-            curl --fail http://localhost:8080/healthz
-
-            echo "Despliegue finalizado correctamente."
+          echo "Rollback completado: produccion sigue en el ambiente anterior."
