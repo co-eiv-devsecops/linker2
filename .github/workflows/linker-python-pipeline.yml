@@ -252,7 +252,6 @@ jobs:
       OCI_CLI_REGION: ${{ vars.OCI_CLI_REGION }}
       OCI_BASTION_OCID: ${{ vars.OCI_BASTION_OCID }}
       OCI_COMPARTMENT_OCID: ${{ vars.OCI_COMPARTMENT_OCID }}
-      OCI_SUBNET_OCID: ${{ vars.OCI_SUBNET_OCID }}
       OCI_IMAGE_OCID: ${{ vars.OCI_IMAGE_OCID }}
       OCI_AVAILABILITY_DOMAIN: ${{ vars.OCI_AVAILABILITY_DOMAIN }}
       OCI_INSTANCE_SHAPE: ${{ vars.OCI_INSTANCE_SHAPE }}
@@ -262,6 +261,9 @@ jobs:
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
+
+      - name: Load infra config (infra/linker.env)
+        run: bash scripts/oci/load_infra_env.sh
 
       - name: Prepare OCI CLI
         uses: oracle-actions/run-oci-cli-command@v1.3.2
@@ -334,21 +336,22 @@ jobs:
       OCI_CLI_REGION: ${{ vars.OCI_CLI_REGION }}
       OCI_BASTION_OCID: ${{ vars.OCI_BASTION_OCID }}
       OCI_COMPARTMENT_OCID: ${{ vars.OCI_COMPARTMENT_OCID }}
-      OCI_SUBNET_OCID: ${{ vars.OCI_SUBNET_OCID }}
       OCI_IMAGE_OCID: ${{ vars.OCI_IMAGE_OCID }}
       OCI_AVAILABILITY_DOMAIN: ${{ vars.OCI_AVAILABILITY_DOMAIN }}
       OCI_INSTANCE_SHAPE: ${{ vars.OCI_INSTANCE_SHAPE }}
       OCI_SHAPE_OCPUS: ${{ vars.OCI_SHAPE_OCPUS }}
       OCI_SHAPE_MEMORY_GB: ${{ vars.OCI_SHAPE_MEMORY_GB }}
-      # Mecanismo de switchover: IP flotante o Load Balancer (ver scripts/oci/switch_traffic.sh)
+      # Mecanismo de switchover: Load Balancer (infra/linker.env) o IP flotante
+      # (vars.OCI_FLOATING_IP_ADDRESS), ver scripts/oci/switch_traffic.sh
       OCI_FLOATING_IP_ADDRESS: ${{ vars.OCI_FLOATING_IP_ADDRESS }}
-      OCI_LB_OCID: ${{ vars.OCI_LB_OCID }}
-      OCI_LB_BACKEND_SET: ${{ vars.OCI_LB_BACKEND_SET }}
       PROD_BASE_URL: ${{ vars.PROD_BASE_URL }}
 
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
+
+      - name: Load infra config (infra/linker.env)
+        run: bash scripts/oci/load_infra_env.sh
 
       - name: Prepare OCI CLI
         uses: oracle-actions/run-oci-cli-command@v1.3.2

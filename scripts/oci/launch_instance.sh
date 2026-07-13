@@ -7,7 +7,7 @@
 # Entradas (variables de entorno):
 #   DISPLAY_NAME              Nombre de la instancia (requerido)
 #   OCI_COMPARTMENT_OCID      Compartment donde crearla (requerido)
-#   OCI_SUBNET_OCID           Subred privada de la instancia (requerido)
+#   OCI_LINKER_SUBNET_OCID           Subred privada de la instancia (requerido)
 #   OCI_IMAGE_OCID            Imagen Ubuntu a usar (requerido)
 #   OCI_AVAILABILITY_DOMAIN   Availability domain (requerido)
 #   DEPLOYMENT_PUBLIC_KEY     Llave publica SSH autorizada (requerido)
@@ -25,7 +25,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 : "${DISPLAY_NAME:?DISPLAY_NAME es requerido}"
 : "${OCI_COMPARTMENT_OCID:?OCI_COMPARTMENT_OCID es requerido}"
-: "${OCI_SUBNET_OCID:?OCI_SUBNET_OCID es requerido}"
+: "${OCI_LINKER_SUBNET_OCID:?OCI_LINKER_SUBNET_OCID es requerido}"
 : "${OCI_IMAGE_OCID:?OCI_IMAGE_OCID es requerido}"
 : "${OCI_AVAILABILITY_DOMAIN:?OCI_AVAILABILITY_DOMAIN es requerido}"
 : "${DEPLOYMENT_PUBLIC_KEY:?DEPLOYMENT_PUBLIC_KEY es requerido}"
@@ -72,7 +72,7 @@ log "Lanzando instancia '$DISPLAY_NAME' (shape: $SHAPE)..."
 INSTANCE_ID="$(oci compute instance launch \
   --compartment-id "$OCI_COMPARTMENT_OCID" \
   --availability-domain "$OCI_AVAILABILITY_DOMAIN" \
-  --subnet-id "$OCI_SUBNET_OCID" \
+  --subnet-id "$OCI_LINKER_SUBNET_OCID" \
   --image-id "$OCI_IMAGE_OCID" \
   --shape "$SHAPE" \
   "${SHAPE_CONFIG_ARGS[@]}" \

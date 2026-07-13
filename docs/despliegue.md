@@ -75,18 +75,31 @@ por eso se pueden retirar instancias sin perder los enlaces acortados.
 
 ### Mecanismos de switchover
 
-`switch_traffic.sh` soporta dos modos, según las variables configuradas:
+`switch_traffic.sh` soporta dos modos:
 
 | Modo | Variables | Cómo funciona |
 |---|---|---|
-| **IP privada flotante** (recomendado) | `OCI_FLOATING_IP_ADDRESS` | El dominio del equipo apunta a una IP privada fija. Esa IP se mantiene como IP secundaria y se mueve entre la VNIC del ambiente azul y verde (`oci network vnic assign-private-ip --unassign-if-already-assigned`). |
-| **Load Balancer OCI** | `OCI_LB_OCID`, `OCI_LB_BACKEND_SET` | Se registra la IP de la instancia nueva como backend y se retiran los backends anteriores del backend set. |
+| **Load Balancer OCI** (el mecanismo del equipo) | `OCI_LB_OCID`, `OCI_LB_LINKER_BACKEND` — versionadas en [`infra/linker.env`](../infra/linker.env) | Se registra la IP de la instancia nueva como backend en el backend set `OCI_LB_LINKER_BACKEND` y se retiran los backends anteriores. |
+| **IP privada flotante** (alternativa, si el equipo deja de usar el Load Balancer) | `vars.OCI_FLOATING_IP_ADDRESS` | El dominio del equipo apunta a una IP privada fija. Esa IP se mantiene como IP secundaria y se mueve entre la VNIC del ambiente azul y verde (`oci network vnic assign-private-ip --unassign-if-already-assigned`). |
+
+`OCI_LB_OCID` tiene prioridad: si está presente (cargado desde `infra/linker.env`), se usa Load Balancer aunque también exista `OCI_FLOATING_IP_ADDRESS`.
 
 > **Primera ejecución**: si ninguna instancia tiene el tag `linker-role=active`
 > (por ejemplo, cuando aún existe la VM fija original), el pipeline despliega
 > `blue`, mueve el tráfico y no elimina nada. La VM antigua debe retirarse una
 > única vez con el propio pipeline o etiquetarse `linker-role=active` para que
 > el siguiente ciclo la retire automáticamente.
+
+## Configuración de infraestructura (`infra/linker.env`)
+
+Los OCID de la subred y el Load Balancer del equipo están versionados en
+[`infra/linker.env`](../infra/linker.env) — no son secretos en sí mismos (se
+necesitan credenciales OCI para usarlos), así que se manejan como
+configuración normal en git en vez de copiarse a mano en GitHub Actions. El
+paso **"Load infra config"**, al inicio de `ephemeral-test` y
+`deploy-blue-green`, ejecuta `scripts/oci/load_infra_env.sh`, que lee ese
+archivo y expone sus variables al resto del job. Si el equipo cambia de
+subred o de Load Balancer, basta con actualizar ese archivo.
 
 ## Variables y secretos requeridos
 
@@ -101,19 +114,22 @@ Nuevos: `GRAFANA_API_TOKEN` (bono de Grafana).
 `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_DATABASE`, `MYSQL_USER`,
 `OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT`.
 
-**Variables nuevas** para crear instancias y hacer switchover:
+**Variables nuevas** para crear instancias:
 
 | Variable | Descripción |
 |---|---|
 | `OCI_COMPARTMENT_OCID` | Compartment del equipo |
-| `OCI_SUBNET_OCID` | Subred privada de las VMs |
 | `OCI_IMAGE_OCID` | Imagen Ubuntu para las instancias |
 | `OCI_AVAILABILITY_DOMAIN` | Availability domain |
 | `OCI_INSTANCE_SHAPE` | Shape (default `VM.Standard.E2.1.Micro`) |
 | `OCI_SHAPE_OCPUS`, `OCI_SHAPE_MEMORY_GB` | Solo para shapes `*.Flex` |
-| `OCI_FLOATING_IP_ADDRESS` **o** `OCI_LB_OCID` + `OCI_LB_BACKEND_SET` | Mecanismo de switchover |
+| `OCI_FLOATING_IP_ADDRESS` | Solo si no se usa el Load Balancer de `infra/linker.env` |
 | `PROD_BASE_URL` | URL pública de producción (default `http://2.n-la-c.app`) |
 | `GRAFANA_URL` | URL base de la instancia de Grafana |
+
+La subred y el Load Balancer (`OCI_LINKER_SUBNET_OCID`, `OCI_LB_OCID`,
+`OCI_LB_LINKER_BACKEND`) **no** se configuran aquí: vienen de
+[`infra/linker.env`](../infra/linker.env).
 
 ## Después del despliegue
 
