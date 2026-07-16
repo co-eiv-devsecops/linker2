@@ -281,3 +281,14 @@ Para garantizar una separación estricta de responsabilidades, el repositorio cu
 
 1. **Pipeline de Despliegue Técnico (`linker-python-pipeline.yml`):** Es el flujo tradicional. Se activa de manera automatizada tras eventos de integración (como un `push` o un `merge`). 
 2. **Pipeline de Lanzamiento (`release-feature.yml`):** Es un flujo de trabajo independiente activado exclusivamente de manera manual (`workflow_dispatch`) desde la pestaña Actions de GitHub. Su única tarea es realizar una petición segura mutando el estado de la bandera `advanced_operations` a través de la API REST de LaunchDarkly, logrando el lanzamiento seguro en producción con un solo click.
+
+## Documentación operativa
+
+La operación del proyecto está documentada en:
+
+- `docs/operaciones.md`: guía para contribuir, probar, desplegar, monitorear y operar Linker.
+- `docs/despliegue.md`: explicación del despliegue, entorno efímero y Blue/Green.
+- `docs/monitoreo.md`: monitoreo con Grafana, healthchecks y trazas.
+- `docs/releases.md`: lanzamiento de funcionalidades mediante feature flags.
+
+Todo cambio debe realizarse en una rama independiente, pasar por Pull Request y ser aprobado por otro integrante antes de integrarse a `main`.
