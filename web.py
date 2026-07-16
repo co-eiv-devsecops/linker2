@@ -9,7 +9,7 @@ controller so it can be reused by other hosts (e.g. ``serverless.py``).
 import logging
 import os
 
-from flask import Flask, Response, request
+from flask import Flask, Response, request, make_response
 
 from config import DATABASE, DB_ENGINE, HOST, LOG_LEVEL, PORT
 from database import SQLiteLinkRepository, create_repository
@@ -109,6 +109,52 @@ def create_app(config=None, repository=None, link_service=None, flag_checker=is_
     @app.get("/r/<short_id>")
     def redirect_short(short_id):
         return to_flask_response(linker.redirect(short_id, build_request()))
+    
+    @app.route("/r/<id>", methods=["HEAD"])
+    def metadata_short(id):
+        flag_checker = app.extensions["linker_flag_checker"]
+        
+        if not flag_checker("advanced_operations", request.environ):
+            logger.warning("Attempt to access HEAD /r/%s but advanced_operations is disabled", id)
+            os.abort(404)
+
+        try:
+            service = app.extensions["linker_service"]
+            url = service.find_url(id)
+        except Exception:
+            logger.error("Failed to resolve metadata for id=%s", id, exc_info=True)
+            os.abort(500)
+
+        if url is None:
+            os.abort(404)
+
+        response = make_response(url, 200)
+        response.headers["Content-Type"] = "text/plain; charset=utf-8"
+        return response
+
+
+    @app.route("/r/<id>", methods=["DELETE"])
+    def delete_short(id):
+        flag_checker = app.extensions["linker_flag_checker"]
+        
+        if not flag_checker("advanced_operations", request.environ):
+            logger.warning("Attempt to access DELETE /r/%s but advanced_operations is disabled", id)
+            os.abort(404)
+
+        try:
+            service = app.extensions["linker_service"]
+            
+            if service.find_url(id) is None:
+                return make_response("Short URL not found", 404)
+            
+            service.repository.connection.execute("DELETE FROM short_url WHERE id = ?", (id,))
+            
+            logger.info("Short URL successfully deleted: id=%s", id)
+            return make_response("Deleted successfully", 200)
+            
+        except Exception:
+            logger.error("Failed to delete id=%s due to an internal error", id, exc_info=True)
+            os.abort(500)
 
     return app
 

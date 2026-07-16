@@ -5,24 +5,24 @@
 Si encuentras un problema de seguridad, no lo publiques en una issue abierta.
 Usa primero el flujo privado de GitHub Security Advisories o el canal privado que tenga definido el equipo del repositorio.
 
-## Que reportar
+## Qué reportar
 
-- descripcion breve del problema;
+- descripción breve del problema;
 - componente afectado;
 - pasos para reproducirlo;
 - impacto esperado;
-- evidencia tecnica relevante;
-- cualquier mitigacion temporal conocida.
+- evidencia técnica relevante;
+- cualquier mitigación temporal conocida.
 
-## Que evitar
+## Qué evitar
 
 - compartir secretos, tokens o credenciales en texto plano;
-- publicar detalles explotables en un issue publico;
-- mezclar un hallazgo de seguridad con una tarea funcional sin dejarlo explicitamente marcado.
+- publicar detalles explotables en un issue público;
+- mezclar un hallazgo de seguridad con una tarea funcional sin dejarlo explícitamente marcado.
 
-## Buenas practicas
+## Buenas prácticas
 
-1. Minimiza la reproduccion del problema.
+1. Minimiza la reproducción del problema.
 2. Aisla el cambio que lo corrige.
-3. Verifica si requiere rotacion de secretos o revisiones de configuracion.
-4. Documenta el rollback si el cambio toca despliegue o configuracion.
+3. Verifica si requiere rotación de secretos o revisiones de configuración.
+4. Documenta el rollback si el cambio toca despliegue o configuración.
