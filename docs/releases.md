@@ -158,3 +158,29 @@ Cada PR debe incluir:
 - evidencia de pruebas;
 - riesgo principal;
 - plan de rollback.
+
+# Lanzamiento de funcionalidades
+
+En Linker, despliegue y lanzamiento son procesos separados.
+
+## Diferencia entre despliegue y lanzamiento
+
+| Proceso | Qué hace | Workflow |
+|---|---|---|
+| Despliegue | Instala una nueva versión de la aplicación. | `.github/workflows/linker-python-pipeline.yml` |
+| Lanzamiento | Activa o desactiva una funcionalidad ya desplegada. | `.github/workflows/release_feature.yml` |
+
+## Feature flags disponibles
+
+| Flag | Variable local | Estado por defecto | Uso |
+|---|---|---|---|
+| `custom-alias` | `LINKER_ENABLE_CUSTOM_ALIAS` | `false` | Permite crear enlaces con alias personalizado. |
+| `advanced-operations` | `LINKER_ENABLE_ADVANCED_OPERATIONS` | `false` | Permite usar operaciones avanzadas sobre enlaces cortos. |
+
+## Operaciones avanzadas
+
+La flag `advanced-operations` habilita:
+
+```txt
+HEAD /r/<id>
+DELETE /r/<id>
