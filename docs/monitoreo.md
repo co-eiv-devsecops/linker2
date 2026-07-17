@@ -55,3 +55,12 @@ Pasos:
   cada fase (entorno efímero, QA del ambiente inactivo y validación
   post-switchover), de modo que un despliegue solo se promueve si la
   telemetría básica está sana.
+
+## Validación post-despliegue usando OpenTelemetry
+
+El proyecto no depende de un token de API de Grafana para validar el monitoreo post-despliegue.
+
+Después de un despliegue exitoso, el pipeline ejecuta:
+
+```txt
+scripts/grafana_check.sh
