@@ -292,3 +292,16 @@ La operación del proyecto está documentada en:
 - `docs/releases.md`: lanzamiento de funcionalidades mediante feature flags.
 
 Todo cambio debe realizarse en una rama independiente, pasar por Pull Request y ser aprobado por otro integrante antes de integrarse a `main`.
+
+## Serverless
+
+El proyecto incluye una alternativa serverless usando AWS Lambda.
+
+Archivos principales:
+
+- `aws_lambda.py`: adaptador para AWS Lambda.
+- `requirements-lambda.txt`: dependencias del artefacto Lambda.
+- `.github/workflows/serverless-aws-lambda.yml`: workflow para construir y desplegar el artefacto serverless.
+- `docs/serverless.md`: documentación del bono serverless.
+
+El objetivo es reutilizar el mismo núcleo de negocio de Linker en diferentes plataformas de despliegue.

@@ -1,0 +1,113 @@
+name: Serverless AWS Lambda
+
+on:
+  workflow_dispatch:
+
+jobs:
+  package-lambda:
+    name: Package AWS Lambda artifact
+    runs-on: ubuntu-latest
+
+    env:
+      DB_ENGINE: sqlite
+      LINKER_DB: /tmp/linker-lambda-ci.db
+      OTEL_TRACES_ENABLED: "false"
+      OTEL_METRICS_ENABLED: "false"
+      LINKER_ENABLE_ADVANCED_OPERATIONS: "true"
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run tests
+        run: |
+          python -m compileall .
+          python -m unittest discover -s tests -p "test_*.py" -v
+
+      - name: Build Lambda artifact
+        run: |
+          rm -rf dist
+          mkdir -p dist/lambda
+
+          cp aws_lambda.py dist/lambda/
+          cp linker_app.py dist/lambda/
+          cp link_service.py dist/lambda/
+          cp database.py dist/lambda/
+          cp feature_flags.py dist/lambda/
+          cp telemetry.py dist/lambda/
+          cp config.py dist/lambda/
+          cp requirements-lambda.txt dist/lambda/requirements.txt
+
+          if [ -f views.py ]; then cp views.py dist/lambda/; fi
+          if [ -d views ]; then cp -r views dist/lambda/; fi
+
+          cd dist/lambda
+          python -m pip install -r requirements.txt -t .
+          zip -r ../linker-lambda.zip .
+
+      - name: Upload Lambda artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linker-lambda
+          path: dist/linker-lambda.zip
+          retention-days: 7
+
+  deploy-lambda:
+    name: Deploy AWS Lambda
+    runs-on: ubuntu-latest
+    needs: package-lambda
+    if: vars.AWS_LAMBDA_FUNCTION_NAME != ''
+
+    steps:
+      - name: Download Lambda artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: linker-lambda
+          path: dist
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Deploy artifact to Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name "${{ vars.AWS_LAMBDA_FUNCTION_NAME }}" \
+            --zip-file fileb://dist/linker-lambda.zip
+
+      - name: Update Lambda environment variables
+        run: |
+          aws lambda update-function-configuration \
+            --function-name "${{ vars.AWS_LAMBDA_FUNCTION_NAME }}" \
+            --environment "Variables={
+              DB_ENGINE=mysql,
+              MYSQL_HOST=${{ vars.MYSQL_HOST }},
+              MYSQL_PORT=${{ vars.MYSQL_PORT }},
+              MYSQL_DATABASE=${{ vars.MYSQL_DATABASE }},
+              MYSQL_USER=${{ vars.MYSQL_USER }},
+              MYSQL_PWD=${{ secrets.MYSQL_PWD }},
+              OTEL_SERVICE_NAME=${{ vars.OTEL_SERVICE_NAME }},
+              OTEL_TRACES_ENABLED=true,
+              OTEL_METRICS_ENABLED=true,
+              OTEL_EXPORTER_OTLP_ENDPOINT=${{ vars.OTEL_EXPORTER_OTLP_ENDPOINT }},
+              OTEL_EXPORTER_OTLP_HEADERS=${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }},
+              LAUNCHDARKLY_SDK_KEY=${{ secrets.LAUNCHDARKLY_SDK_KEY }}
+            }"
+
+      - name: Deployment summary
+        run: |
+          echo "AWS Lambda artifact deployed."
+          echo "Function: ${{ vars.AWS_LAMBDA_FUNCTION_NAME }}"
