@@ -19,13 +19,13 @@ Construir una aplicación web ligera desarrollada en Python para demostrar conce
 El propósito de Linker Python es ofrecer un servicio simple de acortamiento de URL. Por ejemplo, una dirección como:
 
 ```txt
-https://www.ejemplo.com/documentos/proyecto/cloud/linker
+https://2.n-la-c.app/r/TjSgoA
 ```
 
 puede convertirse en una URL corta como:
 
 ```txt
-http://2.n-la-c.app/AbC123
+https://2.n-la-c.app/r/AbC123
 ```
 
 Cuando un usuario accede a la URL corta, la aplicación consulta la base de datos y redirecciona automáticamente a la URL original.
@@ -105,13 +105,13 @@ El código fuente del proyecto se encuentra publicado en GitHub.
 Repositorio:
 
 ```text
-https://github.com/co-eiv-devsecops/linker2
+https://2.n-la-c.app/r/xc4kJw
 ```
 
 Para obtener una copia del proyecto:
 
 ```bash
-git clone https://github.com/co-eiv-devsecops/linker2.git
+git clone https://2.n-la-c.app/r/xc4kJw
 cd linker2
 git checkout feat/newLinker2
 cd linker-python
@@ -165,7 +165,7 @@ El despliegue se realizó sobre una máquina virtual Ubuntu en Oracle Cloud Infr
 ### Clonar el repositorio
 
 ```bash
-git clone https://github.com/co-eiv-devsecops/linker2.git
+git clone https://2.n-la-c.app/r/xc4kJw
 cd linker2
 git checkout feat/newLinker2
 cd linker-python
@@ -243,7 +243,7 @@ curl http://localhost:8080/
 Finalmente, se comprobó el acceso mediante el dominio configurado para el equipo:
 
 ```txt
-http://2.n-la-c.app
+https://2.n-la-c.app
 ```
 
 ---

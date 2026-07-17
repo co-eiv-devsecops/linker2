@@ -109,7 +109,7 @@ bash scripts/integration_tests.sh "$BASE_URL"
 |---|---|
 | `scripts/integration_tests.sh` | Ejecuta pruebas funcionales contra una URL base de Linker. |
 | `scripts/remote_install.sh` | Instala Linker en una VM desde el artefacto del pipeline. |
-| `scripts/grafana_check.sh` | Valida Grafana después del despliegue y crea una anotación. |
+| `scripts/grafana_check.sh` | Valida producción después del despliegue y emite un span OpenTelemetry visible en Grafana. |
 | `scripts/oci/load_infra_env.sh` | Carga variables de infraestructura desde `infra/linker.env`. |
 | `scripts/oci/launch_instance.sh` | Crea una nueva instancia en OCI desde el pipeline. |
 | `scripts/oci/find_active_instance.sh` | Identifica cuál ambiente está activo en Blue/Green. |
@@ -191,11 +191,12 @@ Después de cada despliegue exitoso, el pipeline ejecuta:
 scripts/grafana_check.sh
 ```
 
-Este script realiza tres acciones:
+Este script realiza cuatro acciones:
 
-1. Valida que Grafana esté disponible.
-2. Verifica que existan dashboards de Linker.
-3. Crea una anotación del despliegue.
+1. Valida `/health` y `/healthz` en producción.
+2. Crea un enlace corto de prueba.
+3. Genera tráfico para trazas.
+4. Emite el span `linker.deployment.post_deploy_check` por OpenTelemetry.
 
 En Grafana se deben revisar:
 
@@ -205,7 +206,7 @@ En Grafana se deben revisar:
 - trazas del healthcheck;
 - trazas de creación de enlaces;
 - trazas de redirección;
-- anotaciones de despliegue.
+- span `linker.deployment.post_deploy_check` del despliegue.
 
 ## 13. Spans importantes
 
@@ -218,6 +219,7 @@ linker.http.create_link
 linker.usecase.create_short_link
 linker.http.redirect
 linker.usecase.resolve_short_link
+linker.deployment.post_deploy_check
 ```
 
 ## 14. Variables y secretos
@@ -238,7 +240,6 @@ Nunca se debe subir un archivo `.env` al repositorio.
 | `MYSQL_USER` | Usuario de MySQL. |
 | `OTEL_SERVICE_NAME` | Nombre del servicio observado en Grafana. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Endpoint OTLP de Grafana. |
-| `GRAFANA_URL` | URL base de Grafana. |
 | `PROD_BASE_URL` | URL productiva de Linker. |
 | `OCI_CLI_REGION` | Región de OCI. |
 | `OCI_BASTION_OCID` | OCID del Bastion. |
@@ -255,7 +256,6 @@ Nunca se debe subir un archivo `.env` al repositorio.
 |---|---|
 | `MYSQL_PWD` | Contraseña de MySQL. |
 | `OTEL_EXPORTER_OTLP_HEADERS` | Header de autenticación OTLP. |
-| `GRAFANA_API_TOKEN` | Token para consultar Grafana y crear anotaciones. |
 | `LAUNCHDARKLY_SDK_KEY` | SDK key usado por la aplicación para evaluar flags. |
 | `LAUNCHDARKLY_API_TOKEN` | Token usado por el pipeline para modificar flags. |
 | `DEPLOYMENT_PRIVATE_KEY` | Llave privada para conexión de despliegue. |

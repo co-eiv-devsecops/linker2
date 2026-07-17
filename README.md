@@ -155,7 +155,7 @@ http://localhost:8080
 ```bash
 curl -i -X POST http://localhost:8080/link \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "url=https://www.python.org"
+  -d "url=https://2.n-la-c.app/r/bGXV6Q"
 ```
 
 La respuesta incluye el encabezado `Location` con la URL corta generada.
@@ -194,7 +194,7 @@ Cuando un `push` llega a `main`/`master` y pasa el job `build-and-test`, el work
 1. **`Build`**: empaqueta los archivos necesarios para producción junto con los scripts de instalación remota y pruebas de integración, y los sube como artefacto de GitHub Actions (`linker-app`).
 2. **`ephemeral-test`**: crea una **VM efímera** en OCI, instala el mismo artefacto que irá a producción, ejecuta healthchecks y pruebas de integración/funcionalidad, y destruye la VM al terminar (pase o falle).
 3. **`deploy-blue-green`**: despliegue **Blue/Green** 🔵🟢 a producción: crea una instancia nueva con el color inactivo, hace QA sobre ella sin tráfico, ejecuta el switchover, valida producción y retira la VM de la versión anterior. Si algo falla, hace rollback automático y elimina la VM nueva.
-4. **`grafana-post-deploy`**: verifica Grafana y registra una anotación del despliegue en los dashboards.
+4. **`grafana-post-deploy`**: valida producción después del despliegue, genera tráfico observado y emite un span OpenTelemetry para revisarlo en Grafana.
 
 El flujo completo, los mecanismos de switchover y las variables/secretos requeridos están documentados en [docs/despliegue.md](./docs/despliegue.md). El monitoreo posterior al despliegue está en [docs/monitoreo.md](./docs/monitoreo.md).
 
@@ -215,7 +215,7 @@ El despliegue copia el proyecto completo a la VM, instala Git, Python 3 y Nginx,
 La aplicación debe quedar disponible en:
 
 ```txt
-http://2.n-la-c.app
+https://2.n-la-c.app
 ```
 
 > Nota: si la plataforma no configura HTTPS automáticamente, se debe habilitar TLS según las instrucciones del curso o del administrador de la VM.
@@ -281,6 +281,33 @@ Para garantizar una separación estricta de responsabilidades, el repositorio cu
 
 1. **Pipeline de Despliegue Técnico (`linker-python-pipeline.yml`):** Es el flujo tradicional. Se activa de manera automatizada tras eventos de integración (como un `push` o un `merge`). 
 2. **Pipeline de Lanzamiento (`release-feature.yml`):** Es un flujo de trabajo independiente activado exclusivamente de manera manual (`workflow_dispatch`) desde la pestaña Actions de GitHub. Su única tarea es realizar una petición segura mutando el estado de la bandera `advanced_operations` a través de la API REST de LaunchDarkly, logrando el lanzamiento seguro en producción con un solo click.
+
+## Guia rapida de cumplimiento
+
+Esta tabla resume donde revisar la evidencia principal de los requisitos del curso.
+
+| Requisito | Evidencia en el repositorio |
+|---|---|
+| Aplicacion Linker desplegada | `README.md`, `DOCUMENTO.md`, produccion en `https://2.n-la-c.app` |
+| Enlaces externos de documentacion acortados con Linker | `README.md`, `DOCUMENTO.md`, `docs/releases.md` |
+| CI, pruebas unitarias y validacion de arranque | `.github/workflows/linker-python-pipeline.yml`, `tests/` |
+| Artefacto distribuido con GitHub Packages | Job `publish-image` en `.github/workflows/linker-python-pipeline.yml` |
+| Paridad de entorno y scripts reproducibles | `scripts/install_vm.sh`, `scripts/remote_install.sh`, `scripts/oci/*`, `docs/operaciones.md` |
+| Entorno efimero de pruebas | Job `ephemeral-test` en `.github/workflows/linker-python-pipeline.yml` |
+| Pruebas de integracion y funcionalidad | `scripts/integration_tests.sh`, jobs `ephemeral-test` y `deploy-blue-green` |
+| Despliegue Blue/Green, switchover y retiro de VM | Job `deploy-blue-green`, `scripts/oci/launch_instance.sh`, `scripts/oci/switch_traffic.sh`, `scripts/oci/terminate_instance.sh`, `docs/despliegue.md` |
+| Healthchecks de aplicacion | Rutas `/health` y `/healthz` en `web.py`, validaciones en pipeline y `scripts/integration_tests.sh` |
+| Monitoreo post-despliegue con Grafana | Job `grafana-post-deploy`, `scripts/grafana_check.sh`, `docs/monitoreo.md` |
+| OpenTelemetry: logs, metricas, trazas y OTLP | `link_service.py`, `web.py`, `tests/test_instrumentation.py`, `docs/monitoreo.md` |
+| Configuracion de verbosidad de logs | Variable `LOG_LEVEL` documentada en este README |
+| Lanzamiento separado del despliegue | `.github/workflows/release_feature.yml`, `feature_flags.py`, `docs/releases.md` |
+| Feature flags y LaunchDarkly | `feature_flags.py`, `.github/workflows/release_feature.yml`, `docs/releases.md` |
+| Operaciones `HEAD` y `DELETE` | `web.py`, `link_service.py`, `tests/`, `docs/releases.md` |
+| Guia para nuevos integrantes y operacion sin consola OCI | `CONTRIBUTING.md`, `DEVSECOPS.md`, `docs/operaciones.md`, `.github/ISSUE_TEMPLATE/`, `.github/PULL_REQUEST_TEMPLATE.md` |
+| Serverless como objetivo alternativo de produccion | `aws_lambda.py`, `requirements-lambda.txt`, `.github/workflows/serverless-aws-lambda.yml`, `docs/serverless.md` |
+| Abstraccion para reutilizar el mismo nucleo | `link_service.py`, `database.py`, `web.py`, `aws_lambda.py`, `serverless.py` |
+
+La participacion homogenea se valida en GitHub mediante commits, pull requests y graficas de contribucion; no depende de un cambio de codigo dentro del repositorio.
 
 ## Documentación operativa
 

@@ -22,7 +22,7 @@ push a main
    │
    ├─ deploy-blue-green     Despliegue Blue/Green a producción 🔵🟢
    │
-   └─ grafana-post-deploy   Chequeo de Grafana + anotación del despliegue (bono)
+   └─ grafana-post-deploy   Validación post-despliegue + span OpenTelemetry
 ```
 
 ## 1. Entorno efímero de pruebas (`ephemeral-test`)
@@ -108,7 +108,6 @@ Configurar en *Settings → Secrets and variables → Actions*:
 **Secrets** (ya existentes): `DEPLOYMENT_PRIVATE_KEY`, `DEPLOYMENT_PUBLIC_KEY`,
 `OCI_CLI_USER`, `OCI_CLI_TENANCY`, `OCI_CLI_FINGERPRINT`, `OCI_CLI_KEY_CONTENT`,
 `MYSQL_PWD`, `OTEL_EXPORTER_OTLP_HEADERS`, `LAUNCHDARKLY_SDK_KEY`.
-Nuevos: `GRAFANA_API_TOKEN` (bono de Grafana).
 
 **Variables** (ya existentes): `OCI_CLI_REGION`, `OCI_BASTION_OCID`,
 `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_DATABASE`, `MYSQL_USER`,
@@ -124,8 +123,7 @@ Nuevos: `GRAFANA_API_TOKEN` (bono de Grafana).
 | `OCI_INSTANCE_SHAPE` | Shape (default `VM.Standard.E2.1.Micro`) |
 | `OCI_SHAPE_OCPUS`, `OCI_SHAPE_MEMORY_GB` | Solo para shapes `*.Flex` |
 | `OCI_FLOATING_IP_ADDRESS` | Solo si no se usa el Load Balancer de `infra/linker.env` |
-| `PROD_BASE_URL` | URL pública de producción (default `http://2.n-la-c.app`) |
-| `GRAFANA_URL` | URL base de la instancia de Grafana |
+| `PROD_BASE_URL` | URL pública de producción usada por la validación y el chequeo post-despliegue (default `https://2.n-la-c.app`) |
 
 La subred y el Load Balancer (`OCI_LINKER_SUBNET_OCID`, `OCI_LB_OCID`,
 `OCI_LB_LINKER_BACKEND`) **no** se configuran aquí: vienen de
@@ -133,6 +131,7 @@ La subred y el Load Balancer (`OCI_LINKER_SUBNET_OCID`, `OCI_LB_OCID`,
 
 ## Después del despliegue
 
-El job `grafana-post-deploy` verifica Grafana y anota el despliegue en los
-dashboards. El monitoreo post-despliegue está documentado en
+El job `grafana-post-deploy` valida producción, crea un enlace de prueba,
+genera tráfico y emite el span `linker.deployment.post_deploy_check` por
+OpenTelemetry para revisarlo en Grafana. El monitoreo post-despliegue está documentado en
 [monitoreo.md](./monitoreo.md).

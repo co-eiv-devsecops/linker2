@@ -47,7 +47,7 @@ Luego enviar el alias en una peticion HTTP:
 ```bash
 curl -i -X POST http://localhost:8080/link \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "url=https://www.python.org&alias=python-docs"
+  -d "url=https://2.n-la-c.app/r/bGXV6Q&alias=python-docs"
 ```
 
 Si la flag esta apagada, el parametro `alias` se ignora y Linker genera un id aleatorio como antes.
