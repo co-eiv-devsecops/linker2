@@ -183,6 +183,19 @@ class LinkService:
             parent_span_find.record_exception(e)
             parent_span_find.set_status(trace.Status(trace.StatusCode.ERROR))
             raise
+        
+    def delete_short_link(self, short_id):
+        if not short_id:
+            raise ValueError("Short id is required")
+
+        with tracer.start_as_current_span("trace_delete_link_flow") as span:
+            span.set_attribute("link.short_id", short_id)
+            span.set_attribute("db.operation", "delete")
+
+            deleted = self.repository.delete_link(short_id)
+
+            span.set_attribute("db.result", "deleted" if deleted else "not_found")
+            return deleted    
 
 def create_short_link(connection, url, id_generator=generate_id, custom_id=None):
     service = LinkService(_ConnectionRepository(connection), id_generator=id_generator)

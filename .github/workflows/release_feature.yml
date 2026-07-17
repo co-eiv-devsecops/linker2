@@ -3,35 +3,82 @@ name: Pipeline de Lanzamiento
 on:
   workflow_dispatch:
     inputs:
-      action:
-        description: 'Estado de la funcionalidad advanced_operations (HEAD/DELETE)'
+      feature:
+        description: "Funcionalidad a lanzar"
         required: true
-        default: 'enable'
+        default: "advanced-operations"
+        type: choice
+        options:
+          - advanced-operations
+          - custom-alias
+
+      action:
+        description: "Acción sobre la funcionalidad"
+        required: true
+        default: "enable"
         type: choice
         options:
           - enable
           - disable
 
 jobs:
-  toggle-flag:
+  toggle-feature-flag:
+    name: Toggle feature flag
     runs-on: ubuntu-latest
+
     steps:
-      - name: Modificar Feature Flag en LaunchDarkly vía API
+      - name: Resolve desired state
+        id: state
         run: |
-          VALUE="false"
-          if [ "${{ github.event.inputs.action }}" == "enable" ]; then
-            VALUE="true"
+          if [ "${{ github.event.inputs.action }}" = "enable" ]; then
+            echo "instruction=turnFlagOn" >> "$GITHUB_OUTPUT"
+          else
+            echo "instruction=turnFlagOff" >> "$GITHUB_OUTPUT"
           fi
-          
-          echo "Cambiando la flag 'advanced_operations' a $VALUE en LaunchDarkly..."
-          
-          curl -X PATCH "https://app.launchdarkly.com/api/v2/flags/default/advanced_operations" \
-            -H "Authorization: ${{ secrets.LAUNCHDARKLY_SDK_KEY }}" \
-            -H "Content-Type: application/json; delta=loop" \
-            -d "[
-              {
-                \"op\": \"replace\",
-                \"path\": \"/environments/production/on\",
-                \"value\": $VALUE
-              }
-            ]"
+
+      - name: Validate LaunchDarkly configuration
+        env:
+          LD_API_TOKEN: ${{ secrets.LAUNCHDARKLY_API_TOKEN }}
+          LD_PROJECT_KEY: ${{ vars.LAUNCHDARKLY_PROJECT_KEY }}
+          LD_ENVIRONMENT_KEY: ${{ vars.LAUNCHDARKLY_ENVIRONMENT_KEY }}
+          LD_API_BASE_URL: ${{ vars.LAUNCHDARKLY_API_BASE_URL }}
+        run: |
+          test -n "$LD_API_TOKEN"
+          test -n "$LD_PROJECT_KEY"
+          test -n "$LD_ENVIRONMENT_KEY"
+          test -n "$LD_API_BASE_URL"
+          echo "LaunchDarkly configuration is available."
+
+      - name: Update LaunchDarkly flag
+        env:
+          LD_API_TOKEN: ${{ secrets.LAUNCHDARKLY_API_TOKEN }}
+          LD_PROJECT_KEY: ${{ vars.LAUNCHDARKLY_PROJECT_KEY }}
+          LD_ENVIRONMENT_KEY: ${{ vars.LAUNCHDARKLY_ENVIRONMENT_KEY }}
+          LD_API_BASE_URL: ${{ vars.LAUNCHDARKLY_API_BASE_URL }}
+          FLAG_KEY: ${{ github.event.inputs.feature }}
+          FLAG_INSTRUCTION: ${{ steps.state.outputs.instruction }}
+        run: |
+          set -euo pipefail
+
+          echo "Updating feature flag: $FLAG_KEY"
+          echo "Instruction: $FLAG_INSTRUCTION"
+
+          curl --fail --silent --show-error -X PATCH \
+            "$LD_API_BASE_URL/api/v2/flags/$LD_PROJECT_KEY/$FLAG_KEY" \
+            -H "Authorization: $LD_API_TOKEN" \
+            -H "Content-Type: application/json; domain-model=launchdarkly.semanticpatch" \
+            -d "{
+              \"environmentKey\": \"${LD_ENVIRONMENT_KEY}\",
+              \"instructions\": [
+                {
+                  \"kind\": \"${FLAG_INSTRUCTION}\"
+                }
+              ]
+            }"
+
+      - name: Release summary
+        run: |
+          echo "Feature: ${{ github.event.inputs.feature }}"
+          echo "Action: ${{ github.event.inputs.action }}"
+          echo "This workflow only changes feature release state."
+          echo "No deployment was executed."

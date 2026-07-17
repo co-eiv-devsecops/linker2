@@ -12,19 +12,28 @@ except ImportError:
 
 FLAG_ENV_VARS = {
     "custom_alias": "LINKER_ENABLE_CUSTOM_ALIAS",
+    "advanced_operations": "LINKER_ENABLE_ADVANCED_OPERATIONS",
 }
 
 LAUNCHDARKLY_FLAG_KEYS = {
     "custom_alias": "custom-alias",
+    "advanced_operations": "advanced-operations",
 }
 
 LAUNCHDARKLY_SDK_KEY_ENV = "LAUNCHDARKLY_SDK_KEY"
 LAUNCHDARKLY_CONTEXT_KEY_ENV = "LAUNCHDARKLY_CONTEXT_KEY"
 DEFAULT_CONTEXT_KEY = "linker-python"
+
 TRUE_VALUES = {"1", "true", "yes", "on", "enabled"}
 FALSE_VALUES = {"0", "false", "no", "off", "disabled"}
+
 _launchdarkly_client = None
 _launchdarkly_sdk_key = None
+
+
+def config_value(environ, name, default=None):
+    environ = environ or {}
+    return environ.get(name) or os.environ.get(name, default)
 
 
 def parse_bool(value, default=False):
@@ -43,20 +52,27 @@ def local_flag_value(flag_name, environ=os.environ):
     env_var = FLAG_ENV_VARS.get(flag_name)
     if env_var is None:
         return False
-    return parse_bool(environ.get(env_var), default=False)
+    return parse_bool(config_value(environ, env_var), default=False)
 
 
 def launchdarkly_context(environ=os.environ):
-    context_key = environ.get(LAUNCHDARKLY_CONTEXT_KEY_ENV, DEFAULT_CONTEXT_KEY)
+    context_key = config_value(
+        environ,
+        LAUNCHDARKLY_CONTEXT_KEY_ENV,
+        DEFAULT_CONTEXT_KEY,
+    )
+
     if Context is None:
         return context_key
+
     return Context.builder(context_key).name("Linker Python").build()
 
 
 def get_launchdarkly_client(environ=os.environ):
     global _launchdarkly_client, _launchdarkly_sdk_key
 
-    sdk_key = environ.get(LAUNCHDARKLY_SDK_KEY_ENV)
+    sdk_key = config_value(environ, LAUNCHDARKLY_SDK_KEY_ENV)
+
     if not sdk_key or ldclient is None or Config is None:
         return None
 
@@ -71,10 +87,12 @@ def get_launchdarkly_client(environ=os.environ):
 def is_enabled(flag_name, environ=os.environ, launchdarkly_client=None):
     default = local_flag_value(flag_name, environ)
     flag_key = LAUNCHDARKLY_FLAG_KEYS.get(flag_name)
+
     if flag_key is None:
         return False
 
     client = launchdarkly_client or get_launchdarkly_client(environ)
+
     if client is None:
         return default
 

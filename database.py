@@ -32,6 +32,10 @@ class LinkRepository(ABC):
     @abstractmethod
     def find_url(self, short_id):
         raise NotImplementedError
+    
+    @abstractmethod
+    def delete_link(self, short_id):
+        raise NotImplementedError
 
     @abstractmethod
     def health_check(self):
@@ -105,6 +109,15 @@ class SQLiteLinkRepository(LinkRepository):
 
         return row["url"]
 
+    def delete_link(self, short_id):
+        with self.connection_scope() as connection:
+            cursor = connection.execute(
+                "DELETE FROM short_url WHERE id = ?",
+                (short_id,),
+            )
+            connection.commit()
+            return cursor.rowcount > 0
+    
     def health_check(self):
         with self.connection_scope() as connection:
             connection.execute("SELECT 1").fetchone()
@@ -206,6 +219,18 @@ class MySQLLinkRepository(LinkRepository):
 
         return row[0]
 
+    def delete_link(self, short_id):
+        with self.connection_scope() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                "DELETE FROM short_url WHERE id = %s",
+                (short_id,),
+            )
+            connection.commit()
+            deleted = cursor.rowcount > 0
+            cursor.close()
+            return deleted
+    
     def health_check(self):
         with self.connection_scope() as connection:
             cursor = connection.cursor()

@@ -273,7 +273,81 @@ class LinkerApp:
 
         logger.info("Redirect short_id=%s client=%s", short_id, req.remote_addr)
         return LinkerResponse(status=301, headers={"Location": url})
+    def metadata(self, short_id, req):
+        enabled = self.flag_checker("advanced_operations", req.flag_context)
 
+        with tracer.start_as_current_span("linker.http.metadata") as span:
+            set_attributes(span, request_metadata(req))
+            span.set_attribute("http.route", "/r/<short_id>")
+            span.set_attribute("http.method", "HEAD")
+            span.set_attribute("linker.short_id", short_id)
+            span.set_attribute("feature.advanced_operations.enabled", enabled)
+
+            if not enabled:
+                span.set_attribute("http.status_code", 404)
+                span.set_status(Status(StatusCode.ERROR, "Feature disabled"))
+                return LinkerResponse(status=404, body="Not Found")
+
+            try:
+                url = self.service.find_url(short_id)
+            except Exception as error:
+                logger.error("Failed to resolve metadata for short_id=%s", short_id, exc_info=True)
+                span.record_exception(error)
+                span.set_attribute("http.status_code", 500)
+                span.set_status(Status(StatusCode.ERROR, str(error)))
+                return LinkerResponse(status=500, body="Internal Server Error")
+
+            if url is None:
+                span.set_attribute("http.status_code", 404)
+                span.set_status(Status(StatusCode.ERROR, "Short URL not found"))
+                return LinkerResponse(status=404, body="Not Found")
+
+            span.set_attribute("http.status_code", 200)
+            span.set_attribute("linker.metadata.found", True)
+            span.set_status(Status(StatusCode.OK))
+
+            return LinkerResponse(
+                status=200,
+                body=url,
+                content_type="text/plain; charset=utf-8",
+                headers={"X-Linker-Original-Url": url},
+            )
+
+    def delete(self, short_id, req):
+        enabled = self.flag_checker("advanced_operations", req.flag_context)
+
+        with tracer.start_as_current_span("linker.http.delete") as span:
+            set_attributes(span, request_metadata(req))
+            span.set_attribute("http.route", "/r/<short_id>")
+            span.set_attribute("http.method", "DELETE")
+            span.set_attribute("linker.short_id", short_id)
+            span.set_attribute("feature.advanced_operations.enabled", enabled)
+
+            if not enabled:
+                span.set_attribute("http.status_code", 404)
+                span.set_status(Status(StatusCode.ERROR, "Feature disabled"))
+                return LinkerResponse(status=404, body="Not Found")
+
+            try:
+                deleted = self.service.delete_short_link(short_id)
+            except Exception as error:
+                logger.error("Failed to delete short_id=%s", short_id, exc_info=True)
+                span.record_exception(error)
+                span.set_attribute("http.status_code", 500)
+                span.set_status(Status(StatusCode.ERROR, str(error)))
+                return LinkerResponse(status=500, body="Internal Server Error")
+
+            if not deleted:
+                span.set_attribute("http.status_code", 404)
+                span.set_status(Status(StatusCode.ERROR, "Short URL not found"))
+                return LinkerResponse(status=404, body="Not Found")
+
+            span.set_attribute("http.status_code", 200)
+            span.set_attribute("linker.delete.success", True)
+            span.set_status(Status(StatusCode.OK))
+
+            return LinkerResponse(status=200, body="Deleted successfully")
+    
     # --- Single-entry dispatch (used by serverless / any non-routing host) --
 
     def dispatch(self, req):
@@ -290,7 +364,16 @@ class LinkerApp:
             return self.healthz(req)
         if method == "POST" and path == "/link":
             return self.create_link(req)
-        if method == "GET" and path.startswith("/r/"):
-            return self.redirect(path[len("/r/"):], req)
+        if path.startswith("/r/"):
+            short_id = path[len("/r/"):]
+
+            if method == "GET":
+                return self.redirect(short_id, req)
+
+            if method == "HEAD":
+                return self.metadata(short_id, req)
+
+            if method == "DELETE":
+                return self.delete(short_id, req)
 
         return LinkerResponse(status=404, body="Not Found")
