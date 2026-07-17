@@ -1,103 +1,106 @@
 #!/usr/bin/env bash
-# Chequeo de Grafana después de un despliegue.
+# Chequeo post-despliegue usando OpenTelemetry.
 #
-# Este script:
-# 1. Verifica que Grafana esté arriba y que su base de datos esté sana.
-# 2. Verifica que existan dashboards de Linker.
-# 3. Registra una anotación del despliegue para correlacionar métricas con cambios.
-#
-# Entradas requeridas:
-#   GRAFANA_URL        URL base de Grafana, por ejemplo: <GRAFANA_URL>
-#   GRAFANA_API_TOKEN  Service account token de Grafana
-#
-# Entradas opcionales:
-#   DEPLOY_SHA         SHA del commit desplegado
-#   DEPLOY_RUN_URL     URL de la corrida del pipeline
-#
-# Nota:
-# No se incluyen enlaces http reales en este archivo para cumplir el requisito
-# de que todo enlace externo del repositorio debe estar acortado en Linker.
+# Este script no usa la API HTTP de Grafana.
+# En su lugar:
+# 1. Valida que producción responda /health y /healthz.
+# 2. Ejecuta una prueba funcional creando un enlace corto.
+# 3. Genera tráfico observado.
+# 4. Emite un span OpenTelemetry del despliegue para verlo en Grafana.
 
 set -euo pipefail
 
-: "${GRAFANA_URL:?GRAFANA_URL es requerido como variable del repositorio}"
-: "${GRAFANA_API_TOKEN:?GRAFANA_API_TOKEN es requerido como secret del repositorio}"
+: "${PROD_BASE_URL:?PROD_BASE_URL es requerido}"
+: "${OTEL_EXPORTER_OTLP_ENDPOINT:?OTEL_EXPORTER_OTLP_ENDPOINT es requerido}"
+: "${OTEL_EXPORTER_OTLP_HEADERS:?OTEL_EXPORTER_OTLP_HEADERS es requerido}"
 
-GRAFANA_URL="${GRAFANA_URL%/}"
+PROD_BASE_URL="${PROD_BASE_URL%/}"
 
 log() {
-  printf '\n[grafana-check] %s\n' "$1"
+  printf '\n[otel-post-deploy] %s\n' "$1"
 }
 
-require_command() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    echo "[grafana-check][ERROR] El comando '$1' no está disponible." >&2
-    exit 1
-  fi
-}
+log "1/4 Validando healthchecks de produccion..."
 
-require_command curl
-require_command python3
+curl --fail --silent --show-error --max-time 15 "$PROD_BASE_URL/health"
+echo
 
-AUTH_HEADER="Authorization: Bearer ${GRAFANA_API_TOKEN}"
+curl --fail --silent --show-error --max-time 15 "$PROD_BASE_URL/healthz"
+echo
 
-log "1/3 Verificando salud de Grafana..."
+log "2/4 Ejecutando prueba funcional de creacion de enlace..."
 
-HEALTH_JSON="$(curl --fail --silent --show-error --max-time 15 \
-  -H "$AUTH_HEADER" \
-  "${GRAFANA_URL}/api/health")"
+RESPONSE_HEADERS="$(mktemp)"
+RESPONSE_BODY="$(mktemp)"
 
-echo "$HEALTH_JSON"
+TEST_TARGET_URL="${LINKER_TEST_TARGET_URL:-${PROD_BASE_URL}/health}"
 
-DB_STATUS="$(printf '%s' "$HEALTH_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("database", "unknown"))')"
+curl --fail --silent --show-error -i -X POST "$PROD_BASE_URL/link" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "url=${TEST_TARGET_URL}" \
+  -D "$RESPONSE_HEADERS" \
+  -o "$RESPONSE_BODY"
 
-if [[ "$DB_STATUS" != "ok" ]]; then
-  echo "[grafana-check][ERROR] La base de datos de Grafana no está sana: $DB_STATUS" >&2
+SHORT_LOCATION="$(awk 'tolower($1) == "location:" {print $2}' "$RESPONSE_HEADERS" | tr -d '\r' | tail -1)"
+
+if [[ -z "$SHORT_LOCATION" ]]; then
+  echo "[otel-post-deploy][ERROR] No se obtuvo header Location al crear el enlace." >&2
+  cat "$RESPONSE_HEADERS" >&2
+  cat "$RESPONSE_BODY" >&2
   exit 1
 fi
 
-log "Grafana está arriba y su base de datos responde ok."
+echo "Short URL creada: $SHORT_LOCATION"
 
-log "2/3 Verificando dashboards de Linker..."
+log "3/4 Generando trafico para trazas en Grafana..."
 
-DASHBOARDS_JSON="$(curl --fail --silent --show-error --max-time 15 \
-  -H "$AUTH_HEADER" \
-  "${GRAFANA_URL}/api/search?query=linker&type=dash-db")"
+for attempt in $(seq 1 5); do
+  curl --fail --silent --show-error --max-time 15 "$PROD_BASE_URL/healthz" > /dev/null
+done
 
-DASHBOARD_COUNT="$(printf '%s' "$DASHBOARDS_JSON" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
+curl --fail --silent --show-error --max-time 15 "$SHORT_LOCATION" > /dev/null || true
 
-if [[ "$DASHBOARD_COUNT" -eq 0 ]]; then
-  echo "[grafana-check][ERROR] No se encontró ningún dashboard de Linker en Grafana." >&2
-  exit 1
-fi
+log "4/4 Emitiendo span OpenTelemetry del despliegue..."
 
-printf '%s' "$DASHBOARDS_JSON" | python3 -c 'import json,sys; [print("  -", d.get("title", "sin titulo")) for d in json.load(sys.stdin)]'
-
-log "Se encontraron $DASHBOARD_COUNT dashboards de Linker."
-
-log "3/3 Registrando anotación del despliegue..."
-
-ANNOTATION_PAYLOAD="$(python3 - <<'PY'
-import json
+python3 - <<'PY'
 import os
+import time
 
-deploy_sha = os.environ.get("DEPLOY_SHA", "desconocido")
-deploy_run_url = os.environ.get("DEPLOY_RUN_URL", "no-disponible")
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-payload = {
-    "tags": ["deployment", "linker", "blue-green"],
-    "text": f"Despliegue Blue/Green de Linker - commit: {deploy_sha} - pipeline: {deploy_run_url}",
-}
+service_name = os.environ.get("OTEL_SERVICE_NAME", "linker-post-deploy-check")
 
-print(json.dumps(payload))
+resource = Resource.create({
+    "service.name": service_name,
+    "deployment.environment": "production",
+    "linker.component": "post-deploy-check",
+})
+
+provider = TracerProvider(resource=resource)
+trace.set_tracer_provider(provider)
+
+exporter = OTLPSpanExporter()
+provider.add_span_processor(BatchSpanProcessor(exporter))
+
+tracer = trace.get_tracer("linker.post_deploy")
+
+with tracer.start_as_current_span("linker.deployment.post_deploy_check") as span:
+    span.set_attribute("linker.deploy.sha", os.environ.get("DEPLOY_SHA", "unknown"))
+    span.set_attribute("linker.deploy.run_id", os.environ.get("DEPLOY_RUN_ID", "unknown"))
+    span.set_attribute("linker.deploy.repository", os.environ.get("GITHUB_REPOSITORY", "unknown"))
+    span.set_attribute("linker.deploy.base_url", os.environ.get("PROD_BASE_URL", "unknown"))
+    span.set_attribute("linker.deploy.strategy", "blue-green")
+    span.set_attribute("linker.deploy.validation", "success")
+    span.set_attribute("linker.monitoring.backend", "grafana-cloud-otlp")
+    time.sleep(1)
+
+provider.shutdown()
+
+print("Span linker.deployment.post_deploy_check enviado por OpenTelemetry.")
 PY
-)"
 
-curl --fail --silent --show-error --max-time 15 \
-  -H "$AUTH_HEADER" \
-  -H "Content-Type: application/json" \
-  -X POST "${GRAFANA_URL}/api/annotations" \
-  -d "$ANNOTATION_PAYLOAD" >/dev/null
-
-log "Anotación creada: el despliegue quedará visible en los dashboards."
-log "Chequeo de Grafana post-despliegue finalizado correctamente."
+log "Chequeo post-despliegue finalizado correctamente."
